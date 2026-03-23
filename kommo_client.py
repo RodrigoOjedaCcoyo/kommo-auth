@@ -18,6 +18,14 @@ class KommoClient:
             raise Exception("No se pudo obtener un token válido. Verifica el KOMMO_AUTH_CODE en GitHub Secrets.")
         return {"Authorization": f"Bearer {token_info['access_token']}"}
 
+    def _format_date(self, timestamp):
+        """Convierte Unix timestamp a ISO 8601 para Supabase."""
+        if not timestamp: return None
+        try:
+            return datetime.fromtimestamp(int(timestamp)).isoformat()
+        except:
+            return None
+
     def get_users(self):
         """Obtiene la lista de usuarios/agentes de la cuenta."""
         url = f"{self.base_url}/users"
@@ -52,7 +60,7 @@ class KommoClient:
                 messages.append({
                     "role": "client" if "incoming" in event["type"] else "agent",
                     "text": event.get("value_after", [{}])[0].get("message", {}).get("text", ""),
-                    "time": event.get("created_at")
+                    "time": self._format_date(event.get("created_at"))
                 })
             return messages
         return []
@@ -86,8 +94,8 @@ class KommoClient:
             "responsible_user_id": lead.get("responsible_user_id"),
             "status_id": lead.get("status_id"),
             "pipeline_id": lead.get("pipeline_id"),
-            "created_at": lead.get("created_at"),
-            "updated_at": lead.get("updated_at")
+            "created_at": self._format_date(lead.get("created_at")),
+            "updated_at": self._format_date(lead.get("updated_at"))
         }
 
         # Extraer Custom Fields (por nombre para compatibilidad, o podrías usar IDs si son fijos)
