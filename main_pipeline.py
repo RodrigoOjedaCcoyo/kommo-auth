@@ -30,13 +30,17 @@ def run_telemetry_pipeline():
         stats = kommo.get_global_stats()
         sync.sync_stats(stats)
 
-        # 3. Extraer y Sincronizar Leads (Últimas 48 horas para asegurar todos los recientes)
+        # 3. Extraer y Sincronizar Leads (Recientes + Entrantes)
         logging.info("Extrayendo leads con historial y chats...")
         df_leads = kommo.fetch_all_leads(days_back=2)
+        df_unsorted = kommo.fetch_unsorted_leads()
         
-        if not df_leads.empty:
+        # Combinar ambos dataframes
+        df_total = pd.concat([df_leads, df_unsorted], ignore_index=True) if not df_unsorted.empty else df_leads
+
+        if not df_total.empty:
             # Sincronizar Leads y Eventos de Historial
-            sync.sync_leads(df_leads)
+            sync.sync_leads(df_total)
             
             # 4. Extraer Chat History para cada Lead (Aumentado a 500 para mayor cobertura)
             logging.info("Extrayendo historiales de chat para análisis de IA...")

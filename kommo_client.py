@@ -132,6 +132,38 @@ class KommoClient:
         
         return flat_data
 
+    def fetch_unsorted_leads(self, max_pages=5):
+        """Extrae leads que aún están en la sección 'Entrantes' (Unsorted)."""
+        all_unsorted = []
+        url = f"https://{self.subdomain}.kommo.com/api/v4/leads/unsorted"
+        
+        for page in range(1, max_pages + 1):
+            params = {"page": page, "limit": 50}
+            logging.info(f"Extrayendo leads entrantes (Unsorted) - Página {page}...")
+            response = requests.get(url, headers=self._get_headers(), params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("_embedded", {}).get("unsorted", [])
+                if not items: break
+                
+                for item in items:
+                    # Extraer el objeto lead embebido en el unsorted
+                    embedded_leads = item.get("_embedded", {}).get("leads", [])
+                    if embedded_leads:
+                        lead = embedded_leads[0]
+                        flat = self.flatten_lead(lead)
+                        # Marcar como 'Unsorted' (Status 0 temporalmente)
+                        flat["status_id"] = 0 
+                        all_unsorted.append(flat)
+                
+                if len(items) < 50: break
+                time.sleep(self.rate_limit_delay)
+            else:
+                break
+                
+        return pd.DataFrame(all_unsorted)
+
     def fetch_all_leads(self, days_back=2, max_pages=50):
         """Extracción masiva filtrada por fecha de creación."""
         all_leads = []
