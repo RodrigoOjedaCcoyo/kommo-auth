@@ -74,12 +74,12 @@ class KommoClient:
         return {}
 
     def normalize_channel(self, source):
-        """Lógica de normalización para Marketing Mix Modeling (MMM)."""
+        """Lógica de normalización ampliada para MMM."""
         if not source: return "Organic/Direct"
         s = source.lower()
-        if any(x in s for x in ['fb', 'facebook', 'ig', 'instagram', 'meta']):
+        if any(x in s for x in ['fb', 'facebook', 'ig', 'instagram', 'meta', 'fbc', 'fbp']):
             return "Meta_Ads"
-        if any(x in s for x in ['google', 'cpc', 'g-search', 'adwords']):
+        if any(x in s for x in ['google', 'cpc', 'g-search', 'adwords', 'gclid', 'goog']):
             return "Google_Ads"
         if 'wa' in s or 'whatsapp' in s:
             return "WhatsApp_Direct"
@@ -95,10 +95,18 @@ class KommoClient:
             "status_id": lead.get("status_id"),
             "pipeline_id": lead.get("pipeline_id"),
             "created_at": self._format_date(lead.get("created_at")),
-            "updated_at": self._format_date(lead.get("updated_at"))
+            "updated_at": self._format_date(lead.get("updated_at")),
+            "utm_source": None,
+            "utm_medium": None,
+            "utm_campaign": None,
+            "utm_content": None,
+            "utm_term": None,
+            "gclid": None,
+            "fbc": None,
+            "fbp": None
         }
 
-        # Extraer Custom Fields (por nombre para compatibilidad, o podrías usar IDs si son fijos)
+        # Extraer Custom Fields
         custom_fields = lead.get("custom_fields_values", [])
         if custom_fields:
             for field in custom_fields:
@@ -109,31 +117,47 @@ class KommoClient:
                 if "utm_source" in name: flat_data["utm_source"] = val
                 elif "utm_medium" in name: flat_data["utm_medium"] = val
                 elif "utm_campaign" in name: flat_data["utm_campaign"] = val
+                elif "utm_content" in name: flat_data["utm_content"] = val
+                elif "utm_term" in name: flat_data["utm_term"] = val
                 elif "gclid" in name: flat_data["gclid"] = val
                 elif "fbc" in name: flat_data["fbc"] = val
                 elif "fbp" in name: flat_data["fbp"] = val
 
-        # Normalizar Canal
-        flat_data["marketing_channel"] = self.normalize_channel(flat_data.get("utm_source"))
+        # Normalizar Canal: Usar utm_source o el gclid/fbc si están presentes
+        source_val = flat_data.get("utm_source") or ""
+        if flat_data.get("gclid"): source_val += " google_gclid"
+        if flat_data.get("fbc") or flat_data.get("fbp"): source_val += " meta_pixel"
+        
+        flat_data["marketing_channel"] = self.normalize_channel(source_val)
         
         return flat_data
 
-    def fetch_all_leads(self, max_pages=10):
-        """Extracción masiva con rate limiting."""
+    def fetch_all_leads(self, days_back=2, max_pages=50):
+        """Extracción masiva filtrada por fecha de creación."""
         all_leads = []
         url = f"{self.base_url}/leads"
-        params = {"with": "contacts", "limit": 250}
+        
+        # Filtro de fecha en Unix Timestamp
+        since_timestamp = int(time.time()) - (days_back * 86400)
+        
+        params = {
+            "with": "contacts", 
+            "limit": 250,
+            "filter[created_at][from]": since_timestamp
+        }
         
         for page in range(1, max_pages + 1):
             params["page"] = page
-            logging.info(f"Extrayendo leads - Página {page}...")
+            logging.info(f"Extrayendo leads recientes (Página {page})...")
             response = requests.get(url, headers=self._get_headers(), params=params)
             
             if response.status_code == 200:
-                leads = response.json().get("_embedded", {}).get("leads", [])
+                data = response.json()
+                if not data: break
+                leads = data.get("_embedded", {}).get("leads", [])
                 all_leads.extend([self.flatten_lead(l) for l in leads])
                 if len(leads) < 250: break
-                time.sleep(self.rate_limit_delay) # Rate limiting
+                time.sleep(self.rate_limit_delay)
             else:
                 break
                 

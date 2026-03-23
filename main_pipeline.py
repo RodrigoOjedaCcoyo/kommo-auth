@@ -30,9 +30,9 @@ def run_telemetry_pipeline():
         stats = kommo.get_global_stats()
         sync.sync_stats(stats)
 
-        # 3. Extraer y Sincronizar Leads (Aumentado a 100 páginas = 25,000 leads)
+        # 3. Extraer y Sincronizar Leads (Últimas 48 horas para asegurar todos los recientes)
         logging.info("Extrayendo leads con historial y chats...")
-        df_leads = kommo.fetch_all_leads(max_pages=100)
+        df_leads = kommo.fetch_all_leads(days_back=2)
         
         if not df_leads.empty:
             # Sincronizar Leads y Eventos de Historial
