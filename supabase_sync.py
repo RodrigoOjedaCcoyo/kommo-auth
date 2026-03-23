@@ -51,12 +51,13 @@ class SupabaseSync:
             if lead_id in db_map:
                 old_status = db_map[lead_id]["status_id"]
                 if old_status != new_status:
+                    event_hash = hashlib.md5(f"{lead_id}_{old_status}_{new_status}".encode()).hexdigest()
                     events.append({
                         "lead_id": lead_id,
                         "event_type": "status_change",
                         "old_value": str(old_status),
                         "new_value": str(new_status),
-                        "event_hash": hashlib.md_id(f"{lead_id}_{old_status}_{new_status}".encode()).hexdigest()
+                        "event_hash": event_hash
                     })
             
             leads_to_upsert.append(row.to_dict())
@@ -94,6 +95,9 @@ class SupabaseSync:
         data = {
             "lead_id": lead_id,
             "raw_messages": messages,
-            "last_message_at": pd.to_datetime(messages[-1]["time"], unit='s').isoformat()
+            "last_message_at": messages[-1]["time"]
         }
-        self.supabase.table("chat_analysis").upsert(data, on_conflict="lead_id").execute()
+        try:
+            self.supabase.table("chat_analysis").upsert(data).execute()
+        except Exception as e:
+            logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
