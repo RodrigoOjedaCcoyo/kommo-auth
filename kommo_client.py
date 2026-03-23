@@ -13,6 +13,8 @@ class KommoClient:
 
     def _get_headers(self):
         token_info = self.auth.get_access_token()
+        if not token_info:
+            raise Exception("No se pudo obtener un token válido. Verifica el KOMMO_AUTH_CODE en GitHub Secrets.")
         return {"Authorization": f"Bearer {token_info['access_token']}"}
 
     def get_users(self):

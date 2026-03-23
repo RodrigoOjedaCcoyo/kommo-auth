@@ -1,4 +1,13 @@
--- Esquema de Producción: Telemetría, MMM e IA (Kommo -> Supabase)
+-- Script de Reinicio y Creación de Esquema (Kommo -> Supabase)
+-- ¡ATENCIÓN!: Esto borrará todos los datos actuales en las tablas mencionadas.
+
+DROP TABLE IF EXISTS public.itineraries_sync;
+DROP TABLE IF EXISTS public.chat_analysis;
+DROP TABLE IF EXISTS public.lead_events;
+DROP TABLE IF EXISTS public.leads_master;
+DROP TABLE IF EXISTS public.users_master;
+DROP TABLE IF EXISTS public.kommo_analytics_snapshots;
+DROP TABLE IF EXISTS public.kommo_oauth_tokens;
 
 -- 1. Maestría de Agentes (Vendedores)
 CREATE TABLE IF NOT EXISTS public.users_master (
@@ -25,6 +34,10 @@ CREATE TABLE IF NOT EXISTS public.leads_master (
     utm_source TEXT,
     utm_medium TEXT,
     utm_campaign TEXT,
+    utm_content TEXT,
+    utm_term TEXT,
+    fbc TEXT,
+    fbp TEXT,
     marketing_channel TEXT, -- Normalizado (Meta_Ads, Google_Ads, etc.)
     
     -- Rentabilidad
