@@ -30,21 +30,21 @@ def run_telemetry_pipeline():
         stats = kommo.get_global_stats()
         sync.sync_stats(stats)
 
-        # 3. Extraer y Sincronizar Leads
+        # 3. Extraer y Sincronizar Leads (Aumentado a 100 páginas = 25,000 leads)
         logging.info("Extrayendo leads con historial y chats...")
-        df_leads = kommo.fetch_all_leads(max_pages=20)
+        df_leads = kommo.fetch_all_leads(max_pages=100)
         
         if not df_leads.empty:
             # Sincronizar Leads y Eventos de Historial
             sync.sync_leads(df_leads)
             
-            # 4. Extraer Chat History para cada Lead (Top 50 por ahora para prueba)
+            # 4. Extraer Chat History para cada Lead (Aumentado a 500 para mayor cobertura)
             logging.info("Extrayendo historiales de chat para análisis de IA...")
-            for idx, lead_id in enumerate(df_leads["id"].head(50)):
+            for idx, lead_id in enumerate(df_leads["id"].head(500)):
                 messages = kommo.get_lead_chats(lead_id)
                 if messages:
                     sync.sync_chat_analysis(lead_id, messages)
-                if idx % 10 == 0: logging.info(f"Procesando chats: {idx} completados.")
+                if idx % 50 == 0: logging.info(f"Procesando chats: {idx} completados.")
 
         logging.info("--- Pipeline de Telemetría completado exitosamente ---")
 
