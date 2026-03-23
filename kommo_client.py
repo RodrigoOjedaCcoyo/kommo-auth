@@ -2,6 +2,7 @@ import time
 import requests
 import pandas as pd
 import logging
+from datetime import datetime
 from auth_manager import KommoAuth
 
 class KommoClient:
