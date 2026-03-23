@@ -12,21 +12,31 @@ class KommoAuth:
         self.client_id = os.getenv("KOMMO_CLIENT_ID")
         self.client_secret = os.getenv("KOMMO_CLIENT_SECRET")
         self.redirect_uri = os.getenv("REDIRECT_URI")
-        self.token_file = "tokens.json"
         self.base_url = f"https://{self.subdomain}.kommo.com"
+        
+        # Conexión a Supabase para persistencia
+        from supabase import create_client
+        self.supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
     def save_tokens(self, tokens):
-        """Guarda los tokens en un archivo local."""
-        tokens['expires_at'] = int(time.time()) + tokens['expires_in']
-        with open(self.token_file, 'w') as f:
-            json.dump(tokens, f)
-        print(f"Tokens guardados en {self.token_file}")
+        """Guarda los tokens en Supabase para persistencia en GitHub Actions."""
+        data = {
+            "id": 1,
+            "access_token": tokens['access_token'],
+            "refresh_token": tokens['refresh_token'],
+            "expires_at": int(time.time()) + tokens['expires_in']
+        }
+        self.supabase.table("kommo_oauth_tokens").upsert(data).execute()
+        print("Tokens actualizados en Supabase.")
 
     def load_tokens(self):
-        """Carga los tokens desde el archivo local."""
-        if os.path.exists(self.token_file):
-            with open(self.token_file, 'r') as f:
-                return json.load(f)
+        """Carga los tokens desde Supabase."""
+        try:
+            response = self.supabase.table("kommo_oauth_tokens").select("*").eq("id", 1).execute()
+            if response.data:
+                return response.data[0]
+        except Exception as e:
+            print(f"No se pudieron cargar tokens de Supabase: {e}")
         return None
 
     def exchange_code(self, auth_code):

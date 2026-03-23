@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS public.itineraries_sync (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 7. Persistencia de Autenticación (Para GitHub Actions)
+CREATE TABLE IF NOT EXISTS public.kommo_oauth_tokens (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT one_row_only CHECK (id = 1) -- Solo permitimos una fila de tokens
+);
+
 -- Índices y Seguridad
 CREATE INDEX IF NOT EXISTS idx_leads_marketing_channel ON public.leads_master(marketing_channel);
 CREATE INDEX IF NOT EXISTS idx_leads_responsible ON public.leads_master(responsible_user_id);
