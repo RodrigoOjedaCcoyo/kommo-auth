@@ -92,13 +92,19 @@ class SupabaseSync:
     def sync_chat_analysis(self, lead_id, chat_text):
         """Guarda el historial de chat para análisis de IA."""
         if not chat_text: return
-        data = {
-            "lead_id": lead_id,
-            "raw_messages": {"text": chat_text}
-        }
         try:
-            # Upsert basado en lead_id (UNIQUE)
-            self.supabase.table("chat_analysis").upsert(data, on_conflict="lead_id").execute()
-            logging.info(f"CAPTURA EXITOSA en Supabase para lead {lead_id}")
-        except Exception as e:
-            logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
+            # Intentar INSERT primero
+            self.supabase.table("chat_analysis").insert({
+                "lead_id": lead_id,
+                "raw_messages": {"text": chat_text}
+            }).execute()
+            logging.info(f"CAPTURA EXITOSA (nuevo) en Supabase para lead {lead_id}")
+        except Exception:
+            try:
+                # Si ya existe, hacer UPDATE
+                self.supabase.table("chat_analysis").update({
+                    "raw_messages": {"text": chat_text}
+                }).eq("lead_id", lead_id).execute()
+                logging.info(f"CAPTURA EXITOSA (actualizado) en Supabase para lead {lead_id}")
+            except Exception as e:
+                logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
