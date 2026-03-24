@@ -10,6 +10,12 @@ app = FastAPI()
 sync = SupabaseSync()
 kommo = KommoClient()
 
+# Configurar logging para que se vea en Render
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
 # Nota: KOMMO_SECRET_KEY se usa para validar la firma de los webhooks
 KOMMO_SECRET_KEY = "tu_clave_secreta_de_integracion"
 
@@ -34,9 +40,11 @@ async def kommo_webhook(request: Request):
 
         if not data:
             logging.warning("Webhook recibido sin datos")
+            print("!!! WEBHOOK VACÍO !!!")
             return {"status": "no data"}
 
-        logging.info(f"Contenido: {json.dumps(data)[:500]}...") # Loggeamos solo el inicio por seguridad
+        logging.info(f"LLAVES RECIBIDAS: {list(data.keys())}")
+        print(f"RECIBIDO: {list(data.keys())[:20]}") # Ver las primeras 20 llaves
 
         # 1. Buscar texto de CHAT (formato estándar de WABA en webhooks)
         # Kommo suele enviar una estructura anidada o plana según el tipo de integración
