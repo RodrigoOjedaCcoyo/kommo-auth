@@ -35,20 +35,23 @@ def run_telemetry_pipeline():
         df_leads = kommo.fetch_all_leads(days_back=2)
         df_unsorted = kommo.fetch_unsorted_leads()
         
-        # Combinar ambos dataframes
+        # Combinar ambos dataframes y priorizar por actividad reciente
         df_total = pd.concat([df_leads, df_unsorted], ignore_index=True) if not df_unsorted.empty else df_leads
-
+        
         if not df_total.empty:
             # Sincronizar Leads y Eventos de Historial
             sync.sync_leads(df_total)
             
-            # 4. Extraer Chat History para cada Lead (Aumentado a 500 para mayor cobertura)
+            # Ordenar por fecha de actualización (descendente) para buscar chats en los más activos
+            df_total = df_total.sort_values(by="updated_at", ascending=False)
+
+            # 4. Extraer Chat History para cada Lead (Aumentado a 1000 para mayor cobertura)
             logging.info("Extrayendo historiales de chat para análisis de IA...")
-            for idx, lead_id in enumerate(df_leads["id"].head(500)):
+            for idx, lead_id in enumerate(df_total["id"].head(1000)):
                 messages = kommo.get_lead_chats(lead_id)
                 if messages:
                     sync.sync_chat_analysis(lead_id, messages)
-                if idx % 50 == 0: logging.info(f"Procesando chats: {idx} completados.")
+                if idx % 100 == 0: logging.info(f"Procesando chats: {idx} completados.")
 
         logging.info("--- Pipeline de Telemetría completado exitosamente ---")
 

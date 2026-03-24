@@ -43,37 +43,49 @@ class KommoClient:
         return []
 
     def get_lead_chats(self, lead_id):
-        """Obtiene el historial de mensajes de un lead específico."""
-        # Nota: Kommo maneja chats a través de /api/v4/leads/{id}/conversations o eventos
-        url = f"{self.base_url}/events"
-        # Tipos de eventos comunes para chats en diferentes regiones e integraciones
-        event_types = "incoming_chat_message,outgoing_chat_message,chat_message_created,incoming_message,outgoing_message"
-        params = {
-            "filter[entity_id]": lead_id,
-            "filter[entity_type]": "leads",
-            "filter[type]": event_types
+        """Extrae el historial de chats de un lead buscando en eventos y conversaciones."""
+        # Endpoint de eventos filtrado por lead
+        url_events = f"{self.auth.base_url}/api/v4/events"
+        params_events = {
+            "filter[entity_id][0]": lead_id,
+            "filter[entity_type]": "lead",
+            "limit": 100
         }
-        response = requests.get(url, headers=self._get_headers(), params=params)
-        if response.status_code == 200:
-            events = response.json().get("_embedded", {}).get("events", [])
-            messages = []
-            for event in events:
-                # Intentar extraer el texto del mensaje dependiendo de la estructura del evento
-                text = ""
-                value_after = event.get("value_after", [{}])
-                if value_after and isinstance(value_after, list):
-                    text = value_after[0].get("message", {}).get("text", "")
-                    if not text:
-                        text = value_after[0].get("text", "") # Fallback para otros tipos
-                
-                if text:
-                    messages.append({
-                        "role": "client" if ("incoming" in event["type"]) else "agent",
-                        "text": text,
-                        "time": self._format_date(event.get("created_at"))
-                    })
-            return messages
-        return []
+        
+        chat_content = ""
+        try:
+            resp_events = requests.get(url_events, headers=self._get_headers(), params=params_events)
+            if resp_events.status_code == 200:
+                events = resp_events.json().get("_embedded", {}).get("events", [])
+                for event in events:
+                    # Buscamos eventos de chat (entrantes y salientes)
+                    if "chat_message" in event["type"]:
+                        # Intentar extraer texto si está presente (para widgets de terceros)
+                        value = event.get("value_after", [{}])[0]
+                        if "text" in value:
+                            text = value["text"]
+                            prefix = "CLIENTE: " if "incoming" in event["type"] else "AGENTE: "
+                            chat_content += f"[{event['created_at']}] {prefix}{text}\n"
+                        elif "message" in value and "talk_id" in value["message"]:
+                            # Para WABA (WhatsApp Oficial), solo sabemos que hubo un mensaje
+                            # El texto real usualmente se captura via Webhook en tiempo real
+                            chat_content += f"[{event['created_at']}] [Mensajeria WABA Detectada - Ref: {value['message']['talk_id']}]\n"
+            
+            # 2. Fallback a Notas (algunas integraciones guardan el texto aquí)
+            url_notes = f"{self.auth.base_url}/api/v4/leads/{lead_id}/notes"
+            resp_notes = requests.get(url_notes, headers=self._get_headers())
+            if resp_notes.status_code == 200:
+                notes = resp_notes.json().get("_embedded", {}).get("notes", [])
+                for note in notes:
+                    if note["note_type"] in ["common", "service_message"]:
+                        text = note.get("params", {}).get("text", "")
+                        if text:
+                            chat_content += f"[{note['created_at']}] NOTA: {text}\n"
+        except Exception as e:
+            logging.error(f"Error al obtener chats o notas para el lead {lead_id}: {e}")
+        
+        # Retornar el contenido del chat acumulado
+        return chat_content
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""
