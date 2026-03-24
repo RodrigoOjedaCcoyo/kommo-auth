@@ -25,27 +25,23 @@ async def kommo_webhook(request: Request, x_ca_signature: str = Header(None)):
     
     logging.info(f"Evento recibido: {data.get('leads[status][0][id]')}")
 
-    # 2. Lógica según el evento
-    if "leads[status]" in data:
-        # Cambio de estado detectado
-        lead_id = data.get("leads[status][0][id]")
-        # ... (lógica existente de leads)
-        logging.info(f"Leads status changed: {lead_id}")
-
     # 3. Captura de mensajes de CHAT (aquí es donde llega el TEXTO real)
-    # Kommo envía los chats bajo la clave 'message[add]' o 'message[update]'
-    for key in data.keys():
-        if "message[add]" in key or "message[incoming]" in key:
-            # Extraemos lead_id y texto de forma dinámica
+    logging.info(f"Full Webhook Data: {data}")
+    
+    # Kommo envía los chats bajo claves como 'message[add][0][text]'
+    for key, value in data.items():
+        if "[text]" in key:
             try:
-                # El formato de los webhooks de chat es complejo, buscamos campos clave
-                lead_id = data.get(key.replace("[text]", "[element_id]")) or data.get(key.replace("[text]", "[lead_id]"))
-                text = data.get(key)
-                if lead_id and text:
-                    logging.info(f"Mensaje de chat capturado: {text}")
-                    sync.sync_chat_analysis(int(lead_id), f"CHAT: {text}")
-            except:
-                pass
+                # Buscar el element_id o lead_id asociado en la misma estructura
+                # Ej: si la clave es message[add][0][text], el ID está en message[add][0][element_id]
+                id_key = key.replace("[text]", "[element_id]")
+                lead_id = data.get(id_key) or data.get(key.replace("[text]", "[lead_id]"))
+                
+                if lead_id and value:
+                    logging.info(f"Capturando chat para ID {lead_id}: {value}")
+                    sync.sync_chat_analysis(int(lead_id), f"{value}")
+            except Exception as e:
+                logging.error(f"Error procesando mensaje de chat: {e}")
 
     return {"status": "success"}
 

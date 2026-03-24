@@ -89,16 +89,16 @@ class SupabaseSync:
         self.supabase.table("kommo_analytics_snapshots").insert(data).execute()
         logging.info("Snapshot de estadísticas guardado.")
 
-    def sync_chat_analysis(self, lead_id, messages):
+    def sync_chat_analysis(self, lead_id, chat_text):
         """Guarda el historial de chat para análisis de IA."""
-        if not messages: return
+        if not chat_text: return
         data = {
             "lead_id": lead_id,
-            "raw_messages": messages,
-            "last_message_at": messages[-1]["time"]
+            "chat_content": chat_text
         }
         try:
-            # Especificar on_conflict para asegurar que se identifique el lead_id como clave de actualización
+            # Upsert basado en lead_id (UNIQUE)
             self.supabase.table("chat_analysis").upsert(data, on_conflict="lead_id").execute()
+            logging.info(f"Chat sincronizado para lead {lead_id}")
         except Exception as e:
             logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
