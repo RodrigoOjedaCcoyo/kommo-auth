@@ -98,6 +98,7 @@ class SupabaseSync:
             "last_message_at": messages[-1]["time"]
         }
         try:
-            self.supabase.table("chat_analysis").upsert(data).execute()
+            # Especificar on_conflict para asegurar que se identifique el lead_id como clave de actualización
+            self.supabase.table("chat_analysis").upsert(data, on_conflict="lead_id").execute()
         except Exception as e:
             logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")

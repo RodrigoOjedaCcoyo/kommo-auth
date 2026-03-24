@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS public.lead_events (
 -- 4. Historial de Chats (Para análisis de IA)
 CREATE TABLE IF NOT EXISTS public.chat_analysis (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    lead_id BIGINT REFERENCES public.leads_master(id),
+    lead_id BIGINT UNIQUE REFERENCES public.leads_master(id),
     raw_messages JSONB,
     ia_score_intent NUMERIC(3,2),
     ia_objections JSONB,
