@@ -65,10 +65,14 @@ async def kommo_webhook(request: Request):
         if not chat_text and isinstance(data, dict):
             # Intentar encontrar 'text' y 'lead_id' o 'element_id' en cualquier lugar
             def find_val(obj, target_key):
-                if target_key in obj: return obj[target_key]
-                for v in obj.values():
-                    if isinstance(v, dict):
+                if isinstance(obj, dict):
+                    if target_key in obj: return obj[target_key]
+                    for v in obj.values():
                         res = find_val(v, target_key)
+                        if res: return res
+                elif isinstance(obj, list):
+                    for item in obj:
+                        res = find_val(item, target_key)
                         if res: return res
                 return None
             
