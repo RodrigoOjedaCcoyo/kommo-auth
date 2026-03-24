@@ -45,23 +45,32 @@ class KommoClient:
     def get_lead_chats(self, lead_id):
         """Obtiene el historial de mensajes de un lead específico."""
         # Nota: Kommo maneja chats a través de /api/v4/leads/{id}/conversations o eventos
-        # Aquí usamos el endpoint de eventos filtrado por mensajes de chat
-        url = f"{self.base_url}/events"
+        # Tipos de eventos comunes para chats en diferentes regiones e integraciones
+        event_types = "incoming_chat_message,outgoing_chat_message,chat_message_created,incoming_message,outgoing_message"
         params = {
             "filter[entity_id]": lead_id,
             "filter[entity_type]": "leads",
-            "filter[type]": "incoming_chat_message,outgoing_chat_message"
+            "filter[type]": event_types
         }
         response = requests.get(url, headers=self._get_headers(), params=params)
         if response.status_code == 200:
             events = response.json().get("_embedded", {}).get("events", [])
             messages = []
             for event in events:
-                messages.append({
-                    "role": "client" if "incoming" in event["type"] else "agent",
-                    "text": event.get("value_after", [{}])[0].get("message", {}).get("text", ""),
-                    "time": self._format_date(event.get("created_at"))
-                })
+                # Intentar extraer el texto del mensaje dependiendo de la estructura del evento
+                text = ""
+                value_after = event.get("value_after", [{}])
+                if value_after and isinstance(value_after, list):
+                    text = value_after[0].get("message", {}).get("text", "")
+                    if not text:
+                        text = value_after[0].get("text", "") # Fallback para otros tipos
+                
+                if text:
+                    messages.append({
+                        "role": "client" if ("incoming" in event["type"]) else "agent",
+                        "text": text,
+                        "time": self._format_date(event.get("created_at"))
+                    })
             return messages
         return []
 
