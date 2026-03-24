@@ -46,32 +46,42 @@ async def kommo_webhook(request: Request):
         logging.info(f"LLAVES RECIBIDAS: {list(data.keys())}")
         print(f"RECIBIDO: {list(data.keys())[:20]}") # Ver las primeras 20 llaves
 
-        # 1. Buscar texto de CHAT (formato estándar de WABA en webhooks)
-        # Kommo suele enviar una estructura anidada o plana según el tipo de integración
-        found = False
+        # RECEPTOR AGRESIVO: Buscar texto e ID en cualquier rincón del paquete
+        logging.info(f"Procesando paquete con {len(data)} elementos...")
+        
+        chat_text = None
+        lead_id = None
+        
+        # 1. Búsqueda plana (Form-Data)
         for key, value in data.items():
-            if "[text]" in key:
-                # Si es un chat, buscamos el ID
+            k_lower = key.lower()
+            if "[text]" in k_lower or "text" == k_lower:
+                chat_text = value
+                # Buscar un ID cercano
                 id_key = key.replace("[text]", "[element_id]")
                 lead_id = data.get(id_key) or data.get(key.replace("[text]", "[lead_id]"))
-                
-                if lead_id and value:
-                    logging.info(f"CAPTURA EXITOSA -> Lead: {lead_id}, Msg: {value}")
-                    sync.sync_chat_analysis(int(lead_id), str(value))
-                    found = True
         
-        # 2. Si no es formato plano, buscamos en estructura anidada (JSON)
-        if not found and isinstance(data, dict):
-            # Buscar en 'message' o 'leads'
-            if "message" in data:
-                msg_info = data["message"].get("add", [{}])[0]
-                lead_id = msg_info.get("element_id") or msg_info.get("lead_id")
-                text = msg_info.get("text")
-                if lead_id and text:
-                    sync.sync_chat_analysis(int(lead_id), str(text))
-                    found = True
+        # 2. Búsqueda en JSON anidado (si lo anterior falló)
+        if not chat_text and isinstance(data, dict):
+            # Intentar encontrar 'text' y 'lead_id' o 'element_id' en cualquier lugar
+            def find_val(obj, target_key):
+                if target_key in obj: return obj[target_key]
+                for v in obj.values():
+                    if isinstance(v, dict):
+                        res = find_val(v, target_key)
+                        if res: return res
+                return None
+            
+            chat_text = find_val(data, "text")
+            lead_id = find_val(data, "element_id") or find_val(data, "lead_id")
 
-        return {"status": "success", "processed": found}
+        if chat_text and lead_id:
+            logging.info(f"!!! CAPTURA EXITOSA !!! -> Lead: {lead_id}, Msg: {chat_text}")
+            sync.sync_chat_analysis(int(lead_id), str(chat_text))
+            return {"status": "success", "processed": True}
+        
+        logging.info("Webhook procesado sin encontrar contenido de chat (puede ser un evento de sistema)")
+        return {"status": "ignored", "keys": list(data.keys())[:5]}
 
     except Exception as e:
         logging.error(f"FALLO CRÍTICO EN WEBHOOK: {str(e)}")
