@@ -45,6 +45,7 @@ class KommoClient:
     def get_lead_chats(self, lead_id):
         """Obtiene el historial de mensajes de un lead específico."""
         # Nota: Kommo maneja chats a través de /api/v4/leads/{id}/conversations o eventos
+        url = f"{self.base_url}/events"
         # Tipos de eventos comunes para chats en diferentes regiones e integraciones
         event_types = "incoming_chat_message,outgoing_chat_message,chat_message_created,incoming_message,outgoing_message"
         params = {
