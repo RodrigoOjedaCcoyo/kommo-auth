@@ -94,11 +94,11 @@ class SupabaseSync:
         if not chat_text: return
         data = {
             "lead_id": lead_id,
-            "chat_content": chat_text
+            "raw_messages": {"text": chat_text}
         }
         try:
             # Upsert basado en lead_id (UNIQUE)
             self.supabase.table("chat_analysis").upsert(data, on_conflict="lead_id").execute()
-            logging.info(f"Chat sincronizado para lead {lead_id}")
+            logging.info(f"CAPTURA EXITOSA en Supabase para lead {lead_id}")
         except Exception as e:
             logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
