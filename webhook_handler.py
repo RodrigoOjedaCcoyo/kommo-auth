@@ -40,56 +40,46 @@ async def kommo_webhook(request: Request):
 
         if not data:
             logging.warning("Webhook recibido sin datos")
-            print("!!! WEBHOOK VACÍO !!!")
             return {"status": "no data"}
 
         logging.info(f"LLAVES RECIBIDAS: {list(data.keys())}")
-        print(f"RECIBIDO: {list(data.keys())[:20]}") # Ver las primeras 20 llaves
+        found = False
 
-        # RECEPTOR AGRESIVO: Buscar texto e ID en cualquier rincón del paquete
-        logging.info(f"Procesando paquete con {len(data)} elementos...")
-        
-        chat_text = None
-        lead_id = None
-        
-        # 1. Búsqueda plana (Form-Data)
+        # ── Caso 1: Webhooks Globales de Kommo (Settings > Integrations > Webhooks)
+        # Evento de mensaje nuevo: message[add][0][text], message[add][0][element_id]
         for key, value in data.items():
-            k_lower = key.lower()
-            if "[text]" in k_lower or "text" == k_lower:
-                chat_text = value
-                # Buscar un ID cercano
-                id_key = key.replace("[text]", "[element_id]")
-                lead_id = data.get(id_key) or data.get(key.replace("[text]", "[lead_id]"))
-        
-        # 2. Búsqueda en JSON anidado (si lo anterior falló)
-        if not chat_text and isinstance(data, dict):
-            # Intentar encontrar 'text' y 'lead_id' o 'element_id' en cualquier lugar
-            def find_val(obj, target_key):
-                if isinstance(obj, dict):
-                    if target_key in obj: return obj[target_key]
-                    for v in obj.values():
-                        res = find_val(v, target_key)
-                        if res: return res
-                elif isinstance(obj, list):
-                    for item in obj:
-                        res = find_val(item, target_key)
-                        if res: return res
-                return None
-            
-            chat_text = find_val(data, "text")
-            lead_id = find_val(data, "element_id") or find_val(data, "lead_id")
+            if "[text]" in key and value:
+                # Buscar el lead asociado al mensaje
+                lead_key = key.replace("[text]", "[element_id]")
+                lead_id_str = data.get(lead_key)
+                if not lead_id_str:
+                    lead_key = key.replace("[text]", "[lead_id]")
+                    lead_id_str = data.get(lead_key)
+                
+                if lead_id_str:
+                    try:
+                        lead_id = int(lead_id_str)
+                        logging.info(f"CAPTURA EXITOSA (Mensaje) -> Lead: {lead_id}, Msg: {value}")
+                        sync.sync_chat_analysis(lead_id, str(value))
+                        found = True
+                    except (ValueError, TypeError) as e:
+                        logging.error(f"Error convirtiendo lead_id: {e}")
 
-        if chat_text and lead_id:
-            logging.info(f"!!! CAPTURA EXITOSA !!! -> Lead: {lead_id}, Msg: {chat_text}")
-            sync.sync_chat_analysis(int(lead_id), str(chat_text))
-            return {"status": "success", "processed": True}
-        
-        logging.info("Webhook procesado sin encontrar contenido de chat (puede ser un evento de sistema)")
-        return {"status": "ignored", "keys": list(data.keys())[:5]}
+        # ── Caso 2: Pipeline Trigger (add/update de lead)  
+        # Formato: leads[add][0][id], leads[status][0][id] etc.
+        # Solo loggeamos para confirmar recepción; no hay texto de mensaje aquí.
+        if not found:
+            lead_keys = [k for k in data.keys() if "leads[" in k and "[id]" in k]
+            if lead_keys:
+                lead_id_str = data.get(lead_keys[0])
+                logging.info(f"Evento de Lead (sin mensaje) para lead_id={lead_id_str}. OK.")
+
+        return {"status": "success", "processed": found}
 
     except Exception as e:
         logging.error(f"FALLO CRÍTICO EN WEBHOOK: {str(e)}")
         return {"status": "error", "detail": str(e)}
+
 
 if __name__ == "__main__":
     import uvicorn
