@@ -89,22 +89,37 @@ class SupabaseSync:
         self.supabase.table("kommo_analytics_snapshots").insert(data).execute()
         logging.info("Snapshot de estadísticas guardado.")
 
-    def sync_chat_analysis(self, lead_id, chat_text):
-        """Guarda el historial de chat para análisis de IA."""
-        if not chat_text: return
+    def sync_chat_analysis(self, lead_id, text, direction="entrante", author=""):
+        """Acumula mensajes de chat en un hilo de conversación para análisis de IA."""
+        if not text: return
+        import datetime
+        nuevo_mensaje = {
+            "time": datetime.datetime.utcnow().isoformat(),
+            "from": direction,  # "entrante" o "saliente"
+            "author": author,
+            "text": text
+        }
         try:
-            # Intentar INSERT primero
-            self.supabase.table("chat_analysis").insert({
-                "lead_id": lead_id,
-                "raw_messages": {"text": chat_text}
-            }).execute()
-            logging.info(f"CAPTURA EXITOSA (nuevo) en Supabase para lead {lead_id}")
-        except Exception:
-            try:
-                # Si ya existe, hacer UPDATE
+            # 1. Leer hilo existente
+            result = self.supabase.table("chat_analysis").select("raw_messages").eq("lead_id", lead_id).execute()
+            
+            if result.data:
+                # Existe: agregar el mensaje al hilo
+                existing = result.data[0].get("raw_messages") or []
+                if isinstance(existing, dict):  # compat con formato viejo
+                    existing = [existing]
+                existing.append(nuevo_mensaje)
                 self.supabase.table("chat_analysis").update({
-                    "raw_messages": {"text": chat_text}
+                    "raw_messages": existing
                 }).eq("lead_id", lead_id).execute()
-                logging.info(f"CAPTURA EXITOSA (actualizado) en Supabase para lead {lead_id}")
-            except Exception as e:
-                logging.error(f"Error al sincronizar chat del lead {lead_id}: {e}")
+                logging.info(f"HILO ACTUALIZADO para lead {lead_id} ({direction}): {text[:50]}")
+            else:
+                # No existe: crear nuevo registro
+                self.supabase.table("chat_analysis").insert({
+                    "lead_id": lead_id,
+                    "raw_messages": [nuevo_mensaje]
+                }).execute()
+                logging.info(f"HILO CREADO para lead {lead_id} ({direction}): {text[:50]}")
+        except Exception as e:
+            logging.error(f"Error al sincronizar hilo del lead {lead_id}: {e}")
+

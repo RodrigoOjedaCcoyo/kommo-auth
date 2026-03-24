@@ -49,18 +49,18 @@ async def kommo_webhook(request: Request):
         # Evento de mensaje nuevo: message[add][0][text], message[add][0][element_id]
         for key, value in data.items():
             if "[text]" in key and value:
-                # Buscar el lead asociado al mensaje
-                lead_key = key.replace("[text]", "[element_id]")
-                lead_id_str = data.get(lead_key)
-                if not lead_id_str:
-                    lead_key = key.replace("[text]", "[lead_id]")
-                    lead_id_str = data.get(lead_key)
-                
+                base = key.replace("[text]", "")
+                lead_id_str = data.get(base + "[element_id]") or data.get(base + "[lead_id]")
+                author_type = data.get(base + "[author][type]", "")
+                author_name = data.get(base + "[author][name]", "")
+                # "bot" o "user" = saliente, "contact" = entrante
+                direction = "saliente" if author_type in ("bot", "user") else "entrante"
+
                 if lead_id_str:
                     try:
                         lead_id = int(lead_id_str)
-                        logging.info(f"CAPTURA EXITOSA (Mensaje) -> Lead: {lead_id}, Msg: {value}")
-                        sync.sync_chat_analysis(lead_id, str(value))
+                        logging.info(f"CAPTURA -> Lead: {lead_id} [{direction}] {author_name}: {value[:60]}")
+                        sync.sync_chat_analysis(lead_id, str(value), direction=direction, author=author_name)
                         found = True
                     except (ValueError, TypeError) as e:
                         logging.error(f"Error convirtiendo lead_id: {e}")
