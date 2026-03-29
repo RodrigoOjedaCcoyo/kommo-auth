@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.leads_master (
     fbc TEXT,
     fbp TEXT,
     marketing_channel TEXT, -- Normalizado (Meta_Ads, Google_Ads, etc.)
+    tags JSONB, -- Etiquetas asignadas en Kommo
     
     -- Rentabilidad
     total_cost_itinerary NUMERIC(10,2),

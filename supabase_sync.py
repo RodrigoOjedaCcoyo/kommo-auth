@@ -63,10 +63,13 @@ class SupabaseSync:
             leads_to_upsert.append(row.to_dict())
 
         # 2. Ejecutar UPSERT de Leads
-        # Limpieza de fechas para JSON
+        # Limpieza de valores para JSON
         for l in leads_to_upsert:
             for k, v in l.items():
-                if pd.isna(v): l[k] = None
+                if isinstance(v, list):
+                    continue
+                if pd.isna(v): 
+                    l[k] = None
 
         self.supabase.table("leads_master").upsert(leads_to_upsert).execute()
         
@@ -110,14 +113,16 @@ class SupabaseSync:
                     existing = [existing]
                 existing.append(nuevo_mensaje)
                 self.supabase.table("chat_analysis").update({
-                    "raw_messages": existing
+                    "raw_messages": existing,
+                    "last_message_at": nuevo_mensaje["time"]
                 }).eq("lead_id", lead_id).execute()
                 logging.info(f"HILO ACTUALIZADO para lead {lead_id} ({direction}): {text[:50]}")
             else:
                 # No existe: crear nuevo registro
                 self.supabase.table("chat_analysis").insert({
                     "lead_id": lead_id,
-                    "raw_messages": [nuevo_mensaje]
+                    "raw_messages": [nuevo_mensaje],
+                    "last_message_at": nuevo_mensaje["time"]
                 }).execute()
                 logging.info(f"HILO CREADO para lead {lead_id} ({direction}): {text[:50]}")
         except Exception as e:

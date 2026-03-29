@@ -152,6 +152,10 @@ class KommoClient:
         
         flat_data["marketing_channel"] = self.normalize_channel(source_val)
         
+        # Extraer Etiquetas (Tags)
+        tags_list = [tag.get("name") for tag in lead.get("_embedded", {}).get("tags", [])]
+        flat_data["tags"] = tags_list
+        
         return flat_data
 
     def fetch_unsorted_leads(self, max_pages=5):
