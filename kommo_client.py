@@ -2,7 +2,7 @@ import time
 import requests
 import pandas as pd
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from auth_manager import KommoAuth
 
 class KommoClient:
@@ -86,6 +86,55 @@ class KommoClient:
         
         # Retornar el contenido del chat acumulado
         return chat_content
+
+    def get_lead_chats_json(self, lead_id):
+        """Extrae el historial de chats de un lead como lista JSON para análisis estructurado."""
+        url_events = f"{self.auth.base_url}/api/v4/events"
+        params_events = {
+            "filter[entity_id][0]": lead_id,
+            "filter[entity_type]": "lead",
+            "limit": 100
+        }
+        
+        chat_list = []
+        try:
+            resp_events = requests.get(url_events, headers=self._get_headers(), params=params_events)
+            if resp_events.status_code == 200:
+                events = resp_events.json().get("_embedded", {}).get("events", [])
+                # Ordenar cronológicamente ascendente
+                events = sorted(events, key=lambda x: x.get("created_at", 0))
+                
+                for event in events:
+                    if "chat_message" in event["type"]:
+                        value = event.get("value_after", [{}])[0]
+                        text = value.get("text", "")
+                        
+                        if not text and "message" in value and "text" in value["message"]:
+                            text = value["message"]["text"]
+                            
+                        if not text:
+                            continue
+                            
+                        direction = "entrante" if "incoming" in event["type"] else "saliente"
+                        
+                        author_name = ""
+                        if direction == "saliente":
+                            author_name = "Agente"
+                        else:
+                            author_name = "Cliente"
+                            
+                        time_obj = datetime.fromtimestamp(event["created_at"], tz=timezone.utc)
+                            
+                        chat_list.append({
+                            "time": time_obj.isoformat(),
+                            "from": direction,
+                            "text": text,
+                            "author": author_name
+                        })
+        except Exception as e:
+            logging.error(f"Error al obtener chats JSON para lead {lead_id}: {e}")
+            
+        return chat_list
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""

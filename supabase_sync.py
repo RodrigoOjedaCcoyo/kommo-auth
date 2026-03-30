@@ -128,3 +128,30 @@ class SupabaseSync:
         except Exception as e:
             logging.error(f"Error al sincronizar hilo del lead {lead_id}: {e}")
 
+    def sync_chat_analysis_full(self, lead_id, chat_list):
+        """Sincroniza un listado completo de chats en lugar de mensaje por mensaje."""
+        if not chat_list: return
+        
+        last_msg_time = chat_list[-1]["time"]
+        
+        try:
+            # Upsert relying on lead_id (requires lead_id to be unique/pkey or upsert logic)
+            # Or just check if exists and update/insert
+            result = self.supabase.table("chat_analysis").select("id").eq("lead_id", lead_id).execute()
+            if result.data:
+                self.supabase.table("chat_analysis").update({
+                    "raw_messages": chat_list,
+                    "last_message_at": last_msg_time
+                }).eq("lead_id", lead_id).execute()
+                logging.info(f"HILO REESCRITO COMPLETO vía API para lead {lead_id} ({len(chat_list)} mensajes)")
+            else:
+                self.supabase.table("chat_analysis").insert({
+                    "lead_id": lead_id,
+                    "raw_messages": chat_list,
+                    "last_message_at": last_msg_time
+                }).execute()
+                logging.info(f"HILO CREADO COMPLETO vía API para lead {lead_id} ({len(chat_list)} mensajes)")
+        except Exception as e:
+            logging.error(f"Error al sincronizar historial completo del lead {lead_id}: {e}")
+
+
