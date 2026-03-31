@@ -138,10 +138,13 @@ class KommoClient:
         evs = data.get("_embedded", {}).get("events", [])
         extracted = []
         
-        # Mapeo de tipos de evento que contienen texto
-        # outgoing_chat_message = Vendedor
-        # incoming_chat_message = Cliente
-        
+        if evs:
+            # 🔍 LOG TEMPORAL: Ver estructura cruda del primer mensaje detectado
+            for sample in evs:
+                if "message" in sample["type"] or "chat" in sample["type"]:
+                    logging.info(f"DEBUG_RAW_EVENT: {json.dumps(sample)}")
+                    break
+
         for e in evs:
             text = None
             author_type = "Vendedor" if "outgoing" in e["type"] or "agent" in e["type"] else "Cliente"
