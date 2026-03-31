@@ -126,18 +126,28 @@ class KommoClient:
                 events = sorted(events, key=lambda x: x.get("created_at", 0))
                 
                 for event in events:
+                    event_type = event.get("type", "")
+                    logging.info(f"Procesando evento tipo: {event_type}")
+
                     # Buscamos 'chat_message' o 'message' en el tipo de evento
-                    if "message" in event["type"]:
+                    if "message" in event_type or "chat" in event_type:
                         value = event.get("value_after", [{}])[0]
-                        text = value.get("text", "")
                         
+                        # Ruta 1: Directo en value
+                        text = value.get("text", "")
+                        # Ruta 2: Dentro de message
                         if not text and "message" in value:
                             text = value["message"].get("text", "")
-                            
+                        # Ruta 3: Dentro de note (a veces los chats se guardan como notas)
+                        if not text and "note" in value:
+                            text = value["note"].get("text", "")
+
                         if not text:
+                            # Si sigue sin haber texto, logeamos la estructura para debug
+                            logging.debug(f"Evento sin texto detectado. Estructura: {value}")
                             continue
                             
-                        is_incoming = "incoming" in event["type"]
+                        is_incoming = "incoming" in event_type
                         direction = "entrante" if is_incoming else "saliente"
                         
                         author_name = "Cliente" if is_incoming else "Agente"
