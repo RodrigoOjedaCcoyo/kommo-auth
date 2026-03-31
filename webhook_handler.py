@@ -68,10 +68,9 @@ async def kommo_webhook(request: Request):
         # ── Caso 1.5: Actualización de Conversación (talk[update])
         # Se dispara cuando hay respuestas SALIENTES del Vendedor (o lectura).
         # Como Kommo no envía texto de salida por Webhook, bajamos el historial de la API.
-        talk_keys = [k for k in data.items() if "talk[update]" in k and "[entity_id]" in k]
+        talk_keys = [k for k in data.keys() if "talk[update]" in k and "[entity_id]" in k]
         if talk_keys:
-            key = talk_keys[0][0]
-            lead_id_str = data.get(key)
+            lead_id_str = data.get(talk_keys[0])
             if lead_id_str:
                 try:
                     lead_id = int(lead_id_str)
