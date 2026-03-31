@@ -134,34 +134,36 @@ class KommoClient:
         return []
 
     def _process_events(self, data):
-        """Extrae DIÁLOGOS (Vendedor + Cliente) de los eventos de Kommo."""
+        """Extractor universal agresivo para capturar Diálogos (Vendedor + Cliente)."""
         evs = data.get("_embedded", {}).get("events", [])
         extracted = []
         
-        if evs:
-            # 🔍 LOG DE DIAGNÓSTICO TOTAL: Ver tipos de TODOS los eventos
-            types_found = [e.get("type") for e in evs]
-            logging.info(f"DEBUG_EVENT_TYPES: {types_found}")
-            
-            # Ver estructura cruda de los primeros 3 para no saturar
-            for i, sample in enumerate(evs[:3]):
-                logging.info(f"DEBUG_RAW_EVENT_{i}: {json.dumps(sample)}")
-
         for e in evs:
             text = None
             etype = e.get("type", "")
-            # Ajustamos autor basándonos en el tipo de evento
-            author_type = "Vendedor" if "outgoing" in etype or "agent" in etype else "Cliente"
+            # Vendedor si es outgoing o si tiene un user_id de agente
+            author_type = "Vendedor" if "outgoing" in etype or e.get("created_by") != 0 else "Cliente"
             
-            # 💡 KOMMO WABA HACK: El texto suele estar en value_after -> message -> text
-            val = e.get("value_after")
-            if isinstance(val, list) and len(val) > 0:
-                text = val[0].get("message", {}).get("text") or val[0].get("text")
-            elif isinstance(val, dict):
-                # Caso B: Estructura de objeto directo
-                text = val.get("message", {}).get("text") or val.get("text") or val.get("message_text")
+            # 🔍 BUSQUEDA AGRESIVA DE TEXTO EN EL JSON
+            va = e.get("value_after")
+            if isinstance(va, list) and len(va) > 0: va = va[0]
+            
+            if isinstance(va, dict):
+                # Probar todos los nombres de campos comunes
+                text = (va.get("text") or 
+                        va.get("message_text") or 
+                        va.get("message", {}).get("text") or
+                        va.get("content") or
+                        va.get("value"))
+            
+            # Fallback a 'params' si existe
+            if not text:
+                params = e.get("params", {})
+                if isinstance(params, dict):
+                    text = params.get("text") or params.get("message")
 
-            if text:
+            if text and isinstance(text, str) and len(text.strip()) > 1:
+                logging.info(f"✅ TEXTO ENCONTRADO EN EVENTO ({author_type}): {text[:50]}...")
                 ts = e.get("created_at")
                 dt = datetime.fromtimestamp(ts)
                 extracted.append({
@@ -169,6 +171,7 @@ class KommoClient:
                     "author": author_type,
                     "text": text
                 })
+        
         return extracted
 
     def _process_api_messages(self, data):
