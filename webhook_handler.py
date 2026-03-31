@@ -66,29 +66,28 @@ async def kommo_webhook(request: Request):
                         logging.error(f"Error convirtiendo lead_id: {e}")
 
         # ── Caso 1.5: Actualización de Conversación (talk[update])
-        # Se dispara cuando hay respuestas SALIENTES del Vendedor (o lectura).
-        # Como Kommo no envía texto de salida por Webhook, bajamos el historial de la API.
         talk_keys = [k for k in data.keys() if "talk[update]" in k and "[entity_id]" in k]
         if talk_keys:
             lead_id_str = data.get(talk_keys[0])
-            # Intentar obtener el talk_id real del webhook
-            talk_id_val = None
+            # Extraer AMBOS IDs: el corto y el largo (UUID)
             base_talk = talk_keys[0].split("[entity_id]")[0]
             talk_id_val = data.get(base_talk + "[talk_id]")
+            chat_id_uuid = data.get(base_talk + "[chat_id]") # El ID largo
             
             if lead_id_str:
                 try:
                     lead_id = int(lead_id_str)
-                    logging.info(f"CAPTURA -> Re-sincronizando Hilo via API (Talk: {talk_id_val}) en lead {lead_id}")
+                    logging.info(f"CAPTURA -> Re-sincronizando (Talk: {talk_id_val}, Chat: {chat_id_uuid}) en lead {lead_id}")
                     
-                    history = kommo.get_lead_chats_json(lead_id, talk_id_direct=talk_id_val)
+                    # Intentamos traer historial, pasando el UUID como opción B
+                    history = kommo.get_lead_chats_json(lead_id, talk_id_direct=talk_id_val, chat_uuid=chat_id_uuid)
                     if history:
                         sync.sync_chat_analysis_full(lead_id, history)
                         found = True
                     else:
-                        logging.warning(f"No se obtuvo historial para lead {lead_id} desde la API")
+                        logging.warning(f"API no devolvió historial (404/Vacío) para lead {lead_id}. Manteniendo captura de Webhook.")
                 except Exception as e:
-                    logging.error(f"Error procesando talk[update] para lead {lead_id_str}: {e}")
+                    logging.error(f"Error procesando talk[update]: {e}")
 
         # ── Caso 2: Pipeline Trigger (add/update de lead)  
         # Formato: leads[add][0][id], leads[status][0][id] etc.

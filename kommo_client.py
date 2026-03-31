@@ -102,50 +102,63 @@ class KommoClient:
             logging.error(f"Error obteniendo contacto del lead {lead_id}: {e}")
         return None
 
-    def get_talk_messages(self, talk_id):
-        """Obtiene el historial de mensajes de un Talk (Conversación WABA)."""
-        url = f"{self.base_url}/chats/talks/{talk_id}/messages"
-        try:
-            resp = requests.get(url, headers=self._get_headers())
-            if resp.status_code == 200:
-                msgs = resp.json().get("_embedded", {}).get("messages", [])
-                formatted = []
-                for m in msgs:
-                    # Identificar si es entrante o saliente (Kommo usa author_id)
-                    # Si author_id == 0 o es nulo suele ser el cliente en algunos casos, 
-                    # pero mejor confiar en la estructura de WABA si está disponible
-                    is_incoming = m.get("author_id", 0) == 0 
-                    formatted.append({
-                        "time": m["created_at"],
-                        "from": "entrante" if is_incoming else "saliente",
-                        "text": m.get("text"),
-                        "author": "Cliente" if is_incoming else "Agente",
-                        "id": f"talk_{talk_id}_{m['created_at']}"
-                    })
-                return formatted
-        except Exception as e:
-            logging.error(f"Error obteniendo mensajes del talk {talk_id}: {e}")
-        return []
-
-    def get_lead_chats_json(self, lead_id, talk_id_direct=None):
-        """Extrae historial completo universal con Súper Escáner (X-Ray)."""
-        combined_messages = []
+    def get_talk_messages(self, talk_id=None, chat_uuid=None):
+        """Obtiene el historial de mensajes de un Talk o Chat UUID."""
         headers = self._get_headers()
         
-        logging.info(f"=== DEBUG_SCAN PARA LEAD {lead_id} (Talk ID: {talk_id_direct}) ===")
-
-        # 1. ESCÁNER: Probar /chats/talks/{id}/messages
-        if talk_id_direct:
-            url_talk = f"{self.base_url}/chats/talks/{talk_id_direct}/messages"
+        # Opción A: Talk ID (Clásico)
+        if talk_id:
+            url = f"{self.base_url}/chats/talks/{talk_id}/messages"
             try:
-                resp = requests.get(url_talk, headers=headers)
-                logging.info(f"DEBUG_SCAN 1 (Talks): Status {resp.status_code}")
+                resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    msgs = resp.json().get("_embedded", {}).get("messages", [])
-                    logging.info(f"DEBUG_SCAN 1 Found: {len(msgs)} msgs")
-                    combined_messages.extend(self.get_talk_messages(talk_id_direct))
-            except: pass
+                    return self._process_api_messages(resp.json())
+                else:
+                    logging.warning(f"Talk ID {talk_id} falló con status {resp.status_code}")
+            except Exception as e:
+                logging.error(f"Error en Talk ID {talk_id}: {e}")
 
+        # Opción B: Chat UUID (El ID largo que vimos en logs)
+        if chat_uuid:
+            # Endpoint alternativo para WABA: /messages?filter[chat_id][]={uuid}
+            url = f"{self.base_url}/messages"
+            params = {"filter[chat_id][]": chat_uuid}
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                logging.info(f"DEBUG_UUID Scan para {chat_uuid}: Status {resp.status_code}")
+                if resp.status_code == 200:
+                    return self._process_api_messages(resp.json())
+            except Exception as e:
+                logging.error(f"Error en Chat UUID {chat_uuid}: {e}")
+        
+        return []
+
+    def _process_api_messages(self, data):
+        """Procesa el JSON de mensajes del API a nuestro formato unificado."""
+        msgs = data.get("_embedded", {}).get("messages", [])
+        extracted = []
+        for m in msgs:
+            text = m.get("text")
+            if text:
+                timestamp = m.get("created_at")
+                dt = datetime.fromtimestamp(timestamp)
+                author = m.get("author", {}).get("name", "Sistema")
+                extracted.append({
+                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "author": author,
+                    "text": text
+                })
+        return extracted
+
+    def get_lead_chats_json(self, lead_id, talk_id_direct=None, chat_uuid=None):
+        """Extrae historial completo universal (Último Intento API)."""
+        combined_messages = []
+        
+        # 1. Probar con los IDs directos del Webhook
+        combined_messages.extend(self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid))
+        
+        headers = self._get_headers()
+        
         # 2. ESCÁNER: Probar /events filtrado por lead
         url_events = f"{self.base_url}/events"
         params_events = {"filter[entity_id]": lead_id, "filter[entity]": "lead", "limit": 50}
