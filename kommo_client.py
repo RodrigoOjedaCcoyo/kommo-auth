@@ -139,15 +139,19 @@ class KommoClient:
         extracted = []
         
         if evs:
-            # 🔍 LOG TEMPORAL: Ver estructura cruda del primer mensaje detectado
-            for sample in evs:
-                if "message" in sample["type"] or "chat" in sample["type"]:
-                    logging.info(f"DEBUG_RAW_EVENT: {json.dumps(sample)}")
-                    break
+            # 🔍 LOG DE DIAGNÓSTICO TOTAL: Ver tipos de TODOS los eventos
+            types_found = [e.get("type") for e in evs]
+            logging.info(f"DEBUG_EVENT_TYPES: {types_found}")
+            
+            # Ver estructura cruda de los primeros 3 para no saturar
+            for i, sample in enumerate(evs[:3]):
+                logging.info(f"DEBUG_RAW_EVENT_{i}: {json.dumps(sample)}")
 
         for e in evs:
             text = None
-            author_type = "Vendedor" if "outgoing" in e["type"] or "agent" in e["type"] else "Cliente"
+            etype = e.get("type", "")
+            # Ajustamos autor basándonos en el tipo de evento
+            author_type = "Vendedor" if "outgoing" in etype or "agent" in etype else "Cliente"
             
             # 💡 KOMMO WABA HACK: El texto suele estar en value_after -> message -> text
             val = e.get("value_after")
