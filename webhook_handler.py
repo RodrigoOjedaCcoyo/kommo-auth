@@ -68,23 +68,26 @@ async def kommo_webhook(request: Request):
         # ── Caso 1.5: Actualización de Conversación (talk[update])
         # Se dispara cuando hay respuestas SALIENTES del Vendedor (o lectura).
         # Como Kommo no envía texto de salida por Webhook, bajamos el historial de la API.
-        talk_keys = [k for k in data.keys() if "talk[update]" in k and "[entity_id]" in k]
-        if talk_keys and not found:
-            lead_id_str = data.get(talk_keys[0])
+        talk_keys = [k for k in data.items() if "talk[update]" in k and "[entity_id]" in k]
+        if talk_keys:
+            key = talk_keys[0][0]
+            lead_id_str = data.get(key)
             if lead_id_str:
                 try:
                     lead_id = int(lead_id_str)
                     logging.info(f"CAPTURA -> Re-sincronizando Hilo via API por talk[update] en lead {lead_id}")
+                    
                     history = kommo.get_lead_chats_json(lead_id)
                     if history:
                         sync.sync_chat_analysis_full(lead_id, history)
                         found = True
+                    else:
+                        logging.warning(f"No se obtuvo historial para lead {lead_id} desde la API")
                 except Exception as e:
                     logging.error(f"Error procesando talk[update] para lead {lead_id_str}: {e}")
 
         # ── Caso 2: Pipeline Trigger (add/update de lead)  
         # Formato: leads[add][0][id], leads[status][0][id] etc.
-        # Solo loggeamos para confirmar recepción; no hay texto de mensaje aquí.
         if not found:
             lead_keys = [k for k in data.keys() if "leads[" in k and "[id]" in k]
             if lead_keys:
@@ -96,6 +99,7 @@ async def kommo_webhook(request: Request):
     except Exception as e:
         logging.error(f"FALLO CRÍTICO EN WEBHOOK: {str(e)}")
         return {"status": "error", "detail": str(e)}
+
 
 
 if __name__ == "__main__":

@@ -98,31 +98,39 @@ class KommoClient:
         
         chat_list = []
         try:
-            resp_events = requests.get(url_events, headers=self._get_headers(), params=params_events)
+            # Dar un pequeño respiro a la API de Kommo para que indexe el mensaje recién enviado
+            time.sleep(2)
+            
+            headers = self._get_headers()
+            resp_events = requests.get(url_events, headers=headers, params=params_events)
+            
+            logging.info(f"API EVENTS lead {lead_id} -> Status: {resp_events.status_code}")
+            
             if resp_events.status_code == 200:
-                events = resp_events.json().get("_embedded", {}).get("events", [])
+                events_data = resp_events.json()
+                events = events_data.get("_embedded", {}).get("events", [])
+                logging.info(f"API EVENTS lead {lead_id} -> Encontrados {len(events)} eventos")
+                
                 # Ordenar cronológicamente ascendente
                 events = sorted(events, key=lambda x: x.get("created_at", 0))
                 
                 for event in events:
-                    if "chat_message" in event["type"]:
+                    # Buscamos 'chat_message' o 'message' en el tipo de evento
+                    if "message" in event["type"]:
                         value = event.get("value_after", [{}])[0]
                         text = value.get("text", "")
                         
-                        if not text and "message" in value and "text" in value["message"]:
-                            text = value["message"]["text"]
+                        if not text and "message" in value:
+                            text = value["message"].get("text", "")
                             
                         if not text:
                             continue
                             
-                        direction = "entrante" if "incoming" in event["type"] else "saliente"
+                        is_incoming = "incoming" in event["type"]
+                        direction = "entrante" if is_incoming else "saliente"
                         
-                        author_name = ""
-                        if direction == "saliente":
-                            author_name = "Agente"
-                        else:
-                            author_name = "Cliente"
-                            
+                        author_name = "Cliente" if is_incoming else "Agente"
+                        
                         time_obj = datetime.fromtimestamp(event["created_at"], tz=timezone.utc)
                             
                         chat_list.append({
@@ -131,6 +139,10 @@ class KommoClient:
                             "text": text,
                             "author": author_name
                         })
+                
+                logging.info(f"API EVENTS lead {lead_id} -> Mensajes procesados: {len(chat_list)}")
+            else:
+                logging.error(f"Error API Kommo Events: {resp_events.text}")
         except Exception as e:
             logging.error(f"Error al obtener chats JSON para lead {lead_id}: {e}")
             
