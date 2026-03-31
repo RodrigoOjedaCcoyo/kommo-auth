@@ -88,86 +88,71 @@ class KommoClient:
         return chat_content
 
     def get_lead_chats_json(self, lead_id):
-        """Extrae el historial de chats de un lead como lista JSON para análisis estructurado."""
-        url_events = f"{self.auth.base_url}/api/v4/events"
-        params_events = {
-            "filter[entity_id]": lead_id,
-            "filter[entity]": "lead",
-            "limit": 100
-        }
+        """Extrae historial completo (Eventos + Notas) como lista JSON."""
+        combined_messages = []
+        headers = self._get_headers()
         
-        chat_list = []
+        # 1. Obtener EVENTOS (Mensajes entrantes y algunos salientes)
+        url_events = f"{self.auth.base_url}/api/v4/events"
+        params_events = {"filter[entity_id]": lead_id, "filter[entity]": "lead", "limit": 100}
+        
         try:
-            # Dar un pequeño respiro a la API de Kommo para que indexe el mensaje recién enviado
-            time.sleep(2)
-            
-            # Intento 1
-            headers = self._get_headers()
+            time.sleep(2) # Respiro para indexación
             resp_events = requests.get(url_events, headers=headers, params=params_events)
-            
-            # Si da 401, forzar renovación y reintentar
-            if resp_events.status_code == 401:
-                logging.warning(f"401 Detectado para lead {lead_id}. Forzando renovación de token...")
-                token_info = self.auth.get_access_token(force_refresh=True)
-                if not token_info:
-                    logging.error(f"Fallo crítico: No se pudo obtener un nuevo token para lead {lead_id}")
-                    return []
-                headers = {"Authorization": f"Bearer {token_info['access_token']}"}
-                resp_events = requests.get(url_events, headers=headers, params=params_events)
-            
-            logging.info(f"API EVENTS lead {lead_id} -> Status: {resp_events.status_code}")
-            
             if resp_events.status_code == 200:
-                events_data = resp_events.json()
-                events = events_data.get("_embedded", {}).get("events", [])
-                logging.info(f"API EVENTS lead {lead_id} -> Encontrados {len(events)} eventos")
-                
-                # Ordenar cronológicamente ascendente
-                events = sorted(events, key=lambda x: x.get("created_at", 0))
-                
-                for event in events:
-                    event_type = event.get("type", "")
-                    logging.info(f"Procesando evento tipo: {event_type}")
+                events = resp_events.json().get("_embedded", {}).get("events", [])
+                for e in events:
+                    if "message" in e["type"] or "chat" in e["type"]:
+                        val = e.get("value_after", [{}])[0]
+                        text = val.get("text") or val.get("message", {}).get("text")
+                        if text:
+                            combined_messages.append({
+                                "time": e["created_at"],
+                                "from": "entrante" if "incoming" in e["type"] else "saliente",
+                                "text": text,
+                                "author": "Cliente" if "incoming" in e["type"] else "Agente"
+                            })
+        except Exception as ex:
+            logging.error(f"Error eventos lead {lead_id}: {ex}")
 
-                    # Buscamos 'chat_message' o 'message' en el tipo de evento
-                    if "message" in event_type or "chat" in event_type:
-                        value = event.get("value_after", [{}])[0]
-                        
-                        # Ruta 1: Directo en value
-                        text = value.get("text", "")
-                        # Ruta 2: Dentro de message
-                        if not text and "message" in value:
-                            text = value["message"].get("text", "")
-                        # Ruta 3: Dentro de note (a veces los chats se guardan como notas)
-                        if not text and "note" in value:
-                            text = value["note"].get("text", "")
+        # 2. Obtener NOTAS (Donde WABA suele guardar las respuestas del agente)
+        url_notes = f"{self.auth.base_url}/api/v4/leads/{lead_id}/notes"
+        try:
+            resp_notes = requests.get(url_notes, headers=headers)
+            if resp_notes.status_code == 200:
+                notes = resp_notes.json().get("_embedded", {}).get("notes", [])
+                for n in notes:
+                    # En WABA, las respuestas suelen ser tipo 'common' o 'service_message'
+                    if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message"]:
+                        text = n.get("params", {}).get("text")
+                        if text:
+                            # Determinar dirección por el tipo de nota o contenido
+                            is_outgoing = n["note_type"] in ["common", "service_message"] 
+                            combined_messages.append({
+                                "time": n["created_at"],
+                                "from": "saliente" if is_outgoing else "entrante",
+                                "text": text,
+                                "author": "Agente" if is_outgoing else "Cliente"
+                            })
+        except Exception as ex:
+            logging.error(f"Error notas lead {lead_id}: {ex}")
 
-                        if not text:
-                            # Si sigue sin haber texto, logeamos la estructura para debug
-                            logging.debug(f"Evento sin texto detectado. Estructura: {value}")
-                            continue
-                            
-                        is_incoming = "incoming" in event_type
-                        direction = "entrante" if is_incoming else "saliente"
-                        
-                        author_name = "Cliente" if is_incoming else "Agente"
-                        
-                        time_obj = datetime.fromtimestamp(event["created_at"], tz=timezone.utc)
-                            
-                        chat_list.append({
-                            "time": time_obj.isoformat(),
-                            "from": direction,
-                            "text": text,
-                            "author": author_name
-                        })
-                
-                logging.info(f"API EVENTS lead {lead_id} -> Mensajes procesados: {len(chat_list)}")
-            else:
-                logging.error(f"Error API Kommo Events: {resp_events.text}")
-        except Exception as e:
-            logging.error(f"Error al obtener chats JSON para lead {lead_id}: {e}")
-            
-        return chat_list
+        # 3. Limpiar duplicados por texto y tiempo aproximado (+/- 2 seg)
+        # Y ordenar cronológicamente
+        combined_messages = sorted(combined_messages, key=lambda x: x["time"])
+        
+        # Formatear el tiempo a ISO para Supabase
+        final_chat = []
+        for m in combined_messages:
+            final_chat.append({
+                "time": datetime.fromtimestamp(m["time"], tz=timezone.utc).isoformat(),
+                "from": m["from"],
+                "text": m["text"],
+                "author": m["author"]
+            })
+
+        logging.info(f"HILO CONSOLIDADO lead {lead_id} -> {len(final_chat)} mensajes (Eventos + Notas)")
+        return final_chat
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""
