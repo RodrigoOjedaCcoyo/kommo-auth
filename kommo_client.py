@@ -130,8 +130,18 @@ class KommoClient:
                         logging.info(f"DEBUG: Encontrado EVENTO id={e['id']} tipo={e['type']} en {entity_type}")
                         
                         if "message" in e["type"] or "chat" in e["type"]:
-                            val = e.get("value_after", [{}])[0]
-                            text = val.get("text") or val.get("message", {}).get("text")
+                            val_after = e.get("value_after")
+                            val = {}
+                            if isinstance(val_after, list) and len(val_after) > 0:
+                                val = val_after[0]
+                            elif isinstance(val_after, dict):
+                                val = val_after
+                            
+                            # Intentar obtener el texto de varios lugares posibles
+                            text = (val.get("text") or 
+                                    val.get("message", {}).get("text") or 
+                                    val.get("note", {}).get("text"))
+                            
                             if text:
                                 combined_messages.append({
                                     "time": e["created_at"],
@@ -140,6 +150,8 @@ class KommoClient:
                                     "author": "Cliente" if "incoming" in e["type"] else "Agente",
                                     "id": e["id"]
                                 })
+                            else:
+                                logging.warning(f"DEBUG: Evento {e['id']} sin texto. Data: {val}")
             except Exception as ex:
                 logging.error(f"Error eventos {entity_type} {entity_id}: {ex}")
 
