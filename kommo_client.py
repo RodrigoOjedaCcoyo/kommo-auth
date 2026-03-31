@@ -128,40 +128,50 @@ class KommoClient:
         return []
 
     def get_lead_chats_json(self, lead_id, talk_id_direct=None):
-        """Extrae historial completo universal (WABA Talks + Events + Notes)."""
+        """Extrae historial completo universal con Súper Escáner (X-Ray)."""
         combined_messages = []
         headers = self._get_headers()
         
-        # 0. Usar TALK_ID directo si viene del Webhook
+        logging.info(f"=== DEBUG_SCAN PARA LEAD {lead_id} (Talk ID: {talk_id_direct}) ===")
+
+        # 1. ESCÁNER: Probar /chats/talks/{id}/messages
         if talk_id_direct:
-            logging.info(f"Usando TALK_ID directo: {talk_id_direct}")
-            combined_messages.extend(self.get_talk_messages(talk_id_direct))
-
-        # 1. Buscar otros TALK_ID vinculados al Lead
-        if not combined_messages:
+            url_talk = f"{self.base_url}/chats/talks/{talk_id_direct}/messages"
             try:
-                url_lead = f"{self.base_url}/leads/{lead_id}?with=talks"
-                resp_lead = requests.get(url_lead, headers=headers)
-                if resp_lead.status_code == 200:
-                    talks = resp_lead.json().get("_embedded", {}).get("talks", [])
-                    for t in talks:
-                        tid = t.get("id")
-                        if tid: combined_messages.extend(self.get_talk_messages(tid))
-            except Exception as e:
-                logging.error(f"Error buscando talks en lead {lead_id}: {e}")
+                resp = requests.get(url_talk, headers=headers)
+                logging.info(f"DEBUG_SCAN 1 (Talks): Status {resp.status_code}")
+                if resp.status_code == 200:
+                    msgs = resp.json().get("_embedded", {}).get("messages", [])
+                    logging.info(f"DEBUG_SCAN 1 Found: {len(msgs)} msgs")
+                    combined_messages.extend(self.get_talk_messages(talk_id_direct))
+            except: pass
 
-        # 2. Identificar contacto y buscar en sus talks (Vital para WABA)
+        # 2. ESCÁNER: Probar /events filtrado por lead
+        url_events = f"{self.base_url}/events"
+        params_events = {"filter[entity_id]": lead_id, "filter[entity]": "lead", "limit": 50}
+        try:
+            resp = requests.get(url_events, headers=headers, params=params_events)
+            logging.info(f"DEBUG_SCAN 2 (Events): Status {resp.status_code}")
+            if resp.status_code == 200:
+                evs = resp.json().get("_embedded", {}).get("events", [])
+                for e in evs:
+                    if "message" in e["type"] or "chat" in e["type"]:
+                         logging.info(f"DEBUG_SCAN 2 Evento detectado type={e['type']} data={str(e.get('value_after'))[:200]}")
+        except: pass
+
+        # 3. ESCÁNER: Probar notas del contacto (Muchas WABA viven aquí)
         contact_id = self.get_lead_main_contact_id(lead_id)
-        if contact_id and not combined_messages:
+        if contact_id:
+            url_notes = f"{self.base_url}/contacts/{contact_id}/notes"
             try:
-                url_contact = f"{self.base_url}/contacts/{contact_id}?with=talks"
-                resp_contact = requests.get(url_contact, headers=headers)
-                if resp_contact.status_code == 200:
-                    talks = resp_contact.json().get("_embedded", {}).get("talks", [])
-                    for t in talks:
-                        combined_messages.extend(self.get_talk_messages(t.get("id")))
-            except Exception as e:
-                logging.error(f"Error buscando talks en contacto {contact_id}: {e}")
+                resp = requests.get(url_notes, headers=headers)
+                logging.info(f"DEBUG_SCAN 3 (Contact Notes): Status {resp.status_code}")
+                if resp.status_code == 200:
+                    notes = resp.json().get("_embedded", {}).get("notes", [])
+                    for n in notes:
+                        if "message" in n["note_type"]:
+                            logging.info(f"DEBUG_SCAN 3 Nota detectada type={n['note_type']} params={str(n.get('params'))[:200]}")
+            except: pass
 
         # 3. Fallback a EVENTOS y NOTAS (para otras integraciones no-WABA)
         entities = [("lead", lead_id)]
