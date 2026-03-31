@@ -133,6 +133,36 @@ class KommoClient:
         
         return []
 
+    def _process_events(self, data):
+        """Extrae texto de eventos (Última esperanza para historial WABA)."""
+        evs = data.get("_embedded", {}).get("events", [])
+        extracted = []
+        for e in evs:
+            text = None
+            # Caso A: Texto directo en el evento (raro en WABA)
+            if "message" in e["type"] or "chat" in e["type"]:
+                val = e.get("value_after")
+                if isinstance(val, list) and len(val) > 0:
+                    text = val[0].get("message", {}).get("text")
+                elif isinstance(val, dict):
+                    text = val.get("message", {}).get("text") or val.get("text")
+
+            # Caso B: Kommo a veces guarda el texto en un campo 'params'
+            if not text:
+                params = e.get("value_after", {})
+                if isinstance(params, dict):
+                    text = params.get("text") or params.get("message_text")
+
+            if text:
+                ts = e.get("created_at")
+                dt = datetime.fromtimestamp(ts)
+                extracted.append({
+                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "author": "Kommo Event",
+                    "text": text
+                })
+        return extracted
+
     def _process_api_messages(self, data):
         """Procesa el JSON de mensajes del API a nuestro formato unificado."""
         msgs = data.get("_embedded", {}).get("messages", [])
