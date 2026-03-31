@@ -102,46 +102,79 @@ class KommoClient:
             logging.error(f"Error obteniendo contacto del lead {lead_id}: {e}")
         return None
 
+    def get_talk_messages(self, talk_id):
+        """Obtiene el historial de mensajes de un Talk (Conversación WABA)."""
+        url = f"{self.base_url}/chats/talks/{talk_id}/messages"
+        try:
+            resp = requests.get(url, headers=self._get_headers())
+            if resp.status_code == 200:
+                msgs = resp.json().get("_embedded", {}).get("messages", [])
+                formatted = []
+                for m in msgs:
+                    # Identificar si es entrante o saliente (Kommo usa author_id)
+                    # Si author_id == 0 o es nulo suele ser el cliente en algunos casos, 
+                    # pero mejor confiar en la estructura de WABA si está disponible
+                    is_incoming = m.get("author_id", 0) == 0 
+                    formatted.append({
+                        "time": m["created_at"],
+                        "from": "entrante" if is_incoming else "saliente",
+                        "text": m.get("text"),
+                        "author": "Cliente" if is_incoming else "Agente",
+                        "id": f"talk_{talk_id}_{m['created_at']}"
+                    })
+                return formatted
+        except Exception as e:
+            logging.error(f"Error obteniendo mensajes del talk {talk_id}: {e}")
+        return []
+
     def get_lead_chats_json(self, lead_id):
-        """Extrae historial completo (Lead + Contacto) como lista JSON."""
+        """Extrae historial completo universal (WABA Talks + Events + Notes)."""
         combined_messages = []
         headers = self._get_headers()
         
-        # Identificar el contacto principal para buscar también ahí
+        # 1. Buscar TALK_ID vinculados al Lead
+        try:
+            url_lead = f"{self.base_url}/leads/{lead_id}?with=talks"
+            resp_lead = requests.get(url_lead, headers=headers)
+            if resp_lead.status_code == 200:
+                talks = resp_lead.json().get("_embedded", {}).get("talks", [])
+                for t in talks:
+                    talk_id = t.get("id")
+                    if talk_id:
+                        combined_messages.extend(self.get_talk_messages(talk_id))
+        except Exception as e:
+            logging.error(f"Error buscando talks en lead {lead_id}: {e}")
+
+        # 2. Identificar contacto y buscar en sus talks también
         contact_id = self.get_lead_main_contact_id(lead_id)
-        
-        # Lista de entidades a escanear: el lead y su contacto
-        entities = [("lead", lead_id)]
         if contact_id:
-            entities.append(("contact", contact_id))
-            logging.info(f"Escaneando también contacto {contact_id} para lead {lead_id}")
+            try:
+                url_contact = f"{self.base_url}/contacts/{contact_id}?with=talks"
+                resp_contact = requests.get(url_contact, headers=headers)
+                if resp_contact.status_code == 200:
+                    talks = resp_contact.json().get("_embedded", {}).get("talks", [])
+                    for t in talks:
+                        combined_messages.extend(self.get_talk_messages(t.get("id")))
+            except Exception as e:
+                logging.error(f"Error buscando talks en contacto {contact_id}: {e}")
+
+        # 3. Fallback a EVENTOS y NOTAS (para otras integraciones no-WABA)
+        entities = [("lead", lead_id)]
+        if contact_id: entities.append(("contact", contact_id))
 
         for entity_type, entity_id in entities:
-            # 1. Obtener EVENTOS (DEBUG VERBOSE)
+            # Eventos
             url_events = f"{self.auth.base_url}/api/v4/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
-            
             try:
                 resp_events = requests.get(url_events, headers=headers, params=params_events)
                 if resp_events.status_code == 200:
                     events = resp_events.json().get("_embedded", {}).get("events", [])
                     for e in events:
-                        # LOG VERBOSE para descubrir tipos ocultos
-                        logging.info(f"DEBUG: Encontrado EVENTO id={e['id']} tipo={e['type']} en {entity_type}")
-                        
                         if "message" in e["type"] or "chat" in e["type"]:
                             val_after = e.get("value_after")
-                            val = {}
-                            if isinstance(val_after, list) and len(val_after) > 0:
-                                val = val_after[0]
-                            elif isinstance(val_after, dict):
-                                val = val_after
-                            
-                            # Intentar obtener el texto de varios lugares posibles
-                            text = (val.get("text") or 
-                                    val.get("message", {}).get("text") or 
-                                    val.get("note", {}).get("text"))
-                            
+                            val = val_after[0] if isinstance(val_after, list) and val_after else (val_after if isinstance(val_after, dict) else {})
+                            text = val.get("text") or val.get("message", {}).get("text")
                             if text:
                                 combined_messages.append({
                                     "time": e["created_at"],
@@ -150,53 +183,48 @@ class KommoClient:
                                     "author": "Cliente" if "incoming" in e["type"] else "Agente",
                                     "id": e["id"]
                                 })
-                            else:
-                                logging.warning(f"DEBUG: Evento {e['id']} sin texto. Data: {val}")
-            except Exception as ex:
-                logging.error(f"Error eventos {entity_type} {entity_id}: {ex}")
+            except: pass
 
-            # 2. Obtener NOTAS (DEBUG VERBOSE)
+            # Notas
             url_notes = f"{self.auth.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
             try:
                 resp_notes = requests.get(url_notes, headers=headers)
                 if resp_notes.status_code == 200:
                     notes = resp_notes.json().get("_embedded", {}).get("notes", [])
                     for n in notes:
-                        # LOG VERBOSE para descubrir tipos de notas ocultos
-                        logging.info(f"DEBUG: Encontrada NOTA id={n['id']} tipo={n['note_type']} en {entity_type}")
-                        
-                        if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message", "message_cashback"]:
+                        if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message"]:
                             text = n.get("params", {}).get("text")
                             if text:
-                                is_outgoing = n["note_type"] in ["common", "service_message"] 
                                 combined_messages.append({
                                     "time": n["created_at"],
-                                    "from": "saliente" if is_outgoing else "entrante",
+                                    "from": "saliente" if n["note_type"] in ["common", "service_message"] else "entrante",
                                     "text": text,
-                                    "author": "Agente" if is_outgoing else "Cliente",
+                                    "author": "Agente" if n["note_type"] in ["common", "service_message"] else "Cliente",
                                     "id": n["id"]
                                 })
-            except Exception as ex:
-                logging.error(f"Error notas {entity_type} {entity_id}: {ex}")
+            except: pass
 
-        # 3. Limpiar duplicados por ID y Texto
+        # 4. Limpieza final y orden cronológico
         seen_ids = set()
+        seen_texts = set()
         unique_messages = []
-        # Ordenamos por tiempo primero
-        combined_messages = sorted(combined_messages, key=lambda x: x["time"])
+        combined_messages = sorted(combined_messages, key=lambda x: str(x["time"]))
         
         for m in combined_messages:
             msg_id = m.get("id")
-            if msg_id not in seen_ids:
+            txt = m.get("text", "").strip()
+            # Evitar duplicados por ID o por texto idéntico en tiempo similar
+            if msg_id not in seen_ids and txt not in seen_texts:
                 seen_ids.add(msg_id)
+                seen_texts.add(txt)
                 unique_messages.append({
-                    "time": datetime.fromtimestamp(m["time"], tz=timezone.utc).isoformat(),
+                    "time": datetime.fromtimestamp(int(m["time"]), tz=timezone.utc).isoformat() if isinstance(m["time"], (int,float)) else m["time"],
                     "from": m["from"],
                     "text": m["text"],
                     "author": m["author"]
                 })
 
-        logging.info(f"HILO CONSOLIDADO lead {lead_id} -> {len(unique_messages)} mensajes (Lead + Contacto)")
+        logging.info(f"CAPTURA UNIVERSAL lead {lead_id} -> {len(unique_messages)} mensajes consolidados.")
         return unique_messages
 
     def get_global_stats(self):
