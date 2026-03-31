@@ -87,72 +87,99 @@ class KommoClient:
         # Retornar el contenido del chat acumulado
         return chat_content
 
+    def get_lead_main_contact_id(self, lead_id):
+        """Obtiene el ID del contacto principal de un lead."""
+        url = f"{self.auth.base_url}/api/v4/leads/{lead_id}?with=contacts"
+        try:
+            resp = requests.get(url, headers=self._get_headers())
+            if resp.status_code == 200:
+                contacts = resp.json().get("_embedded", {}).get("contacts", [])
+                for c in contacts:
+                    if c.get("is_main"):
+                        return c.get("id")
+                return contacts[0].get("id") if contacts else None
+        except Exception as e:
+            logging.error(f"Error obteniendo contacto del lead {lead_id}: {e}")
+        return None
+
     def get_lead_chats_json(self, lead_id):
-        """Extrae historial completo (Eventos + Notas) como lista JSON."""
+        """Extrae historial completo (Lead + Contacto) como lista JSON."""
         combined_messages = []
         headers = self._get_headers()
         
-        # 1. Obtener EVENTOS (Mensajes entrantes y algunos salientes)
-        url_events = f"{self.auth.base_url}/api/v4/events"
-        params_events = {"filter[entity_id]": lead_id, "filter[entity]": "lead", "limit": 100}
+        # Identificar el contacto principal para buscar también ahí
+        contact_id = self.get_lead_main_contact_id(lead_id)
         
-        try:
-            time.sleep(2) # Respiro para indexación
-            resp_events = requests.get(url_events, headers=headers, params=params_events)
-            if resp_events.status_code == 200:
-                events = resp_events.json().get("_embedded", {}).get("events", [])
-                for e in events:
-                    if "message" in e["type"] or "chat" in e["type"]:
-                        val = e.get("value_after", [{}])[0]
-                        text = val.get("text") or val.get("message", {}).get("text")
-                        if text:
-                            combined_messages.append({
-                                "time": e["created_at"],
-                                "from": "entrante" if "incoming" in e["type"] else "saliente",
-                                "text": text,
-                                "author": "Cliente" if "incoming" in e["type"] else "Agente"
-                            })
-        except Exception as ex:
-            logging.error(f"Error eventos lead {lead_id}: {ex}")
+        # Lista de entidades a escanear: el lead y su contacto
+        entities = [("lead", lead_id)]
+        if contact_id:
+            entities.append(("contact", contact_id))
+            logging.info(f"Escaneando también contacto {contact_id} para lead {lead_id}")
 
-        # 2. Obtener NOTAS (Donde WABA suele guardar las respuestas del agente)
-        url_notes = f"{self.auth.base_url}/api/v4/leads/{lead_id}/notes"
-        try:
-            resp_notes = requests.get(url_notes, headers=headers)
-            if resp_notes.status_code == 200:
-                notes = resp_notes.json().get("_embedded", {}).get("notes", [])
-                for n in notes:
-                    # En WABA, las respuestas suelen ser tipo 'common' o 'service_message'
-                    if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message"]:
-                        text = n.get("params", {}).get("text")
-                        if text:
-                            # Determinar dirección por el tipo de nota o contenido
-                            is_outgoing = n["note_type"] in ["common", "service_message"] 
-                            combined_messages.append({
-                                "time": n["created_at"],
-                                "from": "saliente" if is_outgoing else "entrante",
-                                "text": text,
-                                "author": "Agente" if is_outgoing else "Cliente"
-                            })
-        except Exception as ex:
-            logging.error(f"Error notas lead {lead_id}: {ex}")
+        for entity_type, entity_id in entities:
+            # 1. Obtener EVENTOS
+            url_events = f"{self.auth.base_url}/api/v4/events"
+            params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
+            
+            try:
+                resp_events = requests.get(url_events, headers=headers, params=params_events)
+                if resp_events.status_code == 200:
+                    events = resp_events.json().get("_embedded", {}).get("events", [])
+                    for e in events:
+                        if "message" in e["type"] or "chat" in e["type"]:
+                            val = e.get("value_after", [{}])[0]
+                            text = val.get("text") or val.get("message", {}).get("text")
+                            if text:
+                                combined_messages.append({
+                                    "time": e["created_at"],
+                                    "from": "entrante" if "incoming" in e["type"] else "saliente",
+                                    "text": text,
+                                    "author": "Cliente" if "incoming" in e["type"] else "Agente",
+                                    "id": e["id"] # Para evitar duplicados
+                                })
+            except Exception as ex:
+                logging.error(f"Error eventos {entity_type} {entity_id}: {ex}")
 
-        # 3. Limpiar duplicados por texto y tiempo aproximado (+/- 2 seg)
-        # Y ordenar cronológicamente
+            # 2. Obtener NOTAS
+            url_notes = f"{self.auth.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
+            try:
+                resp_notes = requests.get(url_notes, headers=headers)
+                if resp_notes.status_code == 200:
+                    notes = resp_notes.json().get("_embedded", {}).get("notes", [])
+                    for n in notes:
+                        if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message", "message_cashback"]:
+                            text = n.get("params", {}).get("text")
+                            if text:
+                                is_outgoing = n["note_type"] in ["common", "service_message"] 
+                                combined_messages.append({
+                                    "time": n["created_at"],
+                                    "from": "saliente" if is_outgoing else "entrante",
+                                    "text": text,
+                                    "author": "Agente" if is_outgoing else "Cliente",
+                                    "id": n["id"]
+                                })
+            except Exception as ex:
+                logging.error(f"Error notas {entity_type} {entity_id}: {ex}")
+
+        # 3. Limpiar duplicados por ID y Texto
+        seen_ids = set()
+        unique_messages = []
+        # Ordenamos por tiempo primero
         combined_messages = sorted(combined_messages, key=lambda x: x["time"])
         
-        # Formatear el tiempo a ISO para Supabase
-        final_chat = []
         for m in combined_messages:
-            final_chat.append({
-                "time": datetime.fromtimestamp(m["time"], tz=timezone.utc).isoformat(),
-                "from": m["from"],
-                "text": m["text"],
-                "author": m["author"]
-            })
+            msg_id = m.get("id")
+            if msg_id not in seen_ids:
+                seen_ids.add(msg_id)
+                unique_messages.append({
+                    "time": datetime.fromtimestamp(m["time"], tz=timezone.utc).isoformat(),
+                    "from": m["from"],
+                    "text": m["text"],
+                    "author": m["author"]
+                })
 
-        logging.info(f"HILO CONSOLIDADO lead {lead_id} -> {len(final_chat)} mensajes (Eventos + Notas)")
-        return final_chat
+        logging.info(f"HILO CONSOLIDADO lead {lead_id} -> {len(unique_messages)} mensajes (Lead + Contacto)")
+        return unique_messages
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""
