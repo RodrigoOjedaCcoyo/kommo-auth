@@ -139,6 +139,9 @@ class KommoClient:
         extracted = []
         
         for e in evs:
+            # 🔍 LOG DE "MÁXIMA VISIBILIDAD": Ver cada evento crudo
+            logging.info(f"RAW_EVENT: {json.dumps(e)}")
+            
             text = None
             etype = e.get("type", "")
             # Vendedor si es outgoing o si tiene un user_id de agente
