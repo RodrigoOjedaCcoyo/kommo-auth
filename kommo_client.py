@@ -117,7 +117,7 @@ class KommoClient:
             logging.info(f"Escaneando también contacto {contact_id} para lead {lead_id}")
 
         for entity_type, entity_id in entities:
-            # 1. Obtener EVENTOS
+            # 1. Obtener EVENTOS (DEBUG VERBOSE)
             url_events = f"{self.auth.base_url}/api/v4/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             
@@ -126,6 +126,9 @@ class KommoClient:
                 if resp_events.status_code == 200:
                     events = resp_events.json().get("_embedded", {}).get("events", [])
                     for e in events:
+                        # LOG VERBOSE para descubrir tipos ocultos
+                        logging.info(f"DEBUG: Encontrado EVENTO id={e['id']} tipo={e['type']} en {entity_type}")
+                        
                         if "message" in e["type"] or "chat" in e["type"]:
                             val = e.get("value_after", [{}])[0]
                             text = val.get("text") or val.get("message", {}).get("text")
@@ -135,18 +138,21 @@ class KommoClient:
                                     "from": "entrante" if "incoming" in e["type"] else "saliente",
                                     "text": text,
                                     "author": "Cliente" if "incoming" in e["type"] else "Agente",
-                                    "id": e["id"] # Para evitar duplicados
+                                    "id": e["id"]
                                 })
             except Exception as ex:
                 logging.error(f"Error eventos {entity_type} {entity_id}: {ex}")
 
-            # 2. Obtener NOTAS
+            # 2. Obtener NOTAS (DEBUG VERBOSE)
             url_notes = f"{self.auth.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
             try:
                 resp_notes = requests.get(url_notes, headers=headers)
                 if resp_notes.status_code == 200:
                     notes = resp_notes.json().get("_embedded", {}).get("notes", [])
                     for n in notes:
+                        # LOG VERBOSE para descubrir tipos de notas ocultos
+                        logging.info(f"DEBUG: Encontrada NOTA id={n['id']} tipo={n['note_type']} en {entity_type}")
+                        
                         if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message", "message_cashback"]:
                             text = n.get("params", {}).get("text")
                             if text:
