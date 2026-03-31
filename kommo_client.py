@@ -134,31 +134,32 @@ class KommoClient:
         return []
 
     def _process_events(self, data):
-        """Extrae texto de eventos (Última esperanza para historial WABA)."""
+        """Extrae DIÁLOGOS (Vendedor + Cliente) de los eventos de Kommo."""
         evs = data.get("_embedded", {}).get("events", [])
         extracted = []
+        
+        # Mapeo de tipos de evento que contienen texto
+        # outgoing_chat_message = Vendedor
+        # incoming_chat_message = Cliente
+        
         for e in evs:
             text = None
-            # Caso A: Texto directo en el evento (raro en WABA)
-            if "message" in e["type"] or "chat" in e["type"]:
-                val = e.get("value_after")
-                if isinstance(val, list) and len(val) > 0:
-                    text = val[0].get("message", {}).get("text")
-                elif isinstance(val, dict):
-                    text = val.get("message", {}).get("text") or val.get("text")
-
-            # Caso B: Kommo a veces guarda el texto en un campo 'params'
-            if not text:
-                params = e.get("value_after", {})
-                if isinstance(params, dict):
-                    text = params.get("text") or params.get("message_text")
+            author_type = "Vendedor" if "outgoing" in e["type"] or "agent" in e["type"] else "Cliente"
+            
+            # 💡 KOMMO WABA HACK: El texto suele estar en value_after -> message -> text
+            val = e.get("value_after")
+            if isinstance(val, list) and len(val) > 0:
+                text = val[0].get("message", {}).get("text") or val[0].get("text")
+            elif isinstance(val, dict):
+                # Caso B: Estructura de objeto directo
+                text = val.get("message", {}).get("text") or val.get("text") or val.get("message_text")
 
             if text:
                 ts = e.get("created_at")
                 dt = datetime.fromtimestamp(ts)
                 extracted.append({
                     "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "author": "Kommo Event",
+                    "author": author_type,
                     "text": text
                 })
         return extracted
