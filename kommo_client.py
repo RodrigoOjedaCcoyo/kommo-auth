@@ -195,73 +195,26 @@ class KommoClient:
         return extracted
 
     def get_lead_chats_json(self, lead_id, talk_id_direct=None, chat_uuid=None):
-        """Extrae historial completo universal (Último Intento API)."""
+        """Extrae el historial completo (Diálogo Vendedor + Cliente) de forma universal."""
         combined_messages = []
-        
-        # 1. Probar con los IDs directos del Webhook
-        combined_messages.extend(self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid))
-        
         headers = self._get_headers()
         
-        # 2. ESCÁNER: Probar /events filtrado por lead
-        url_events = f"{self.base_url}/events"
-        params_events = {"filter[entity_id]": lead_id, "filter[entity]": "lead", "limit": 50}
-        try:
-            resp = requests.get(url_events, headers=headers, params=params_events)
-            logging.info(f"DEBUG_SCAN 2 (Events): Status {resp.status_code}")
-            if resp.status_code == 200:
-                evs = resp.json().get("_embedded", {}).get("events", [])
-                for e in evs:
-                    if "message" in e["type"] or "chat" in e["type"]:
-                         logging.info(f"DEBUG_SCAN 2 Evento detectado type={e['type']} data={str(e.get('value_after'))[:200]}")
-        except: pass
-
-        # 3. ESCÁNER: Probar notas del contacto (Muchas WABA viven aquí)
+        # 1. Intentar mensajes directos si tenemos IDs (Talk/UUID)
+        combined_messages.extend(self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid))
+        
+        # 2. Recolectar ENTIDADES relacionadas
+        entities = [("lead", lead_id)]
         contact_id = self.get_lead_main_contact_id(lead_id)
         if contact_id:
-            url_notes = f"{self.base_url}/contacts/{contact_id}/notes"
-            try:
-                resp = requests.get(url_notes, headers=headers)
-                logging.info(f"DEBUG_SCAN 3 (Contact Notes): Status {resp.status_code}")
-                if resp.status_code == 200:
-                    notes = resp.json().get("_embedded", {}).get("notes", [])
-                    for n in notes:
-                        if "message" in n["note_type"]:
-                            logging.info(f"DEBUG_SCAN 3 Nota detectada type={n['note_type']} params={str(n.get('params'))[:200]}")
-            except: pass
-
-        # 3. Fallback a EVENTOS y NOTAS (para otras integraciones no-WABA)
-        entities = [("lead", lead_id)]
-        if contact_id: entities.append(("contact", contact_id))
+            entities.append(("contact", contact_id))
+            
+        logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id}...")
 
         for entity_type, entity_id in entities:
-            # Eventos
-            url_events = f"{self.auth.base_url}/api/v4/events"
+            # --- A. EVENTOS (Aquí suele estar el Vendedor) ---
+            url_events = f"{self.base_url}/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             try:
-                resp_events = requests.get(url_events, headers=headers, params=params_events)
-                if resp_events.status_code == 200:
-                    events = resp_events.json().get("_embedded", {}).get("events", [])
-                    for e in events:
-                        if "message" in e["type"] or "chat" in e["type"]:
-                            val_after = e.get("value_after")
-                            val = val_after[0] if isinstance(val_after, list) and val_after else (val_after if isinstance(val_after, dict) else {})
-                            text = val.get("text") or val.get("message", {}).get("text")
-                            if text:
-                                combined_messages.append({
-                                    "time": e["created_at"],
-                                    "from": "entrante" if "incoming" in e["type"] else "saliente",
-                                    "text": text,
-                                    "author": "Cliente" if "incoming" in e["type"] else "Agente",
-                                    "id": e["id"]
-                                })
-            except: pass
-
-            # Notas
-            url_notes = f"{self.auth.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
-            try:
-                resp_notes = requests.get(url_notes, headers=headers)
-                if resp_notes.status_code == 200:
                     notes = resp_notes.json().get("_embedded", {}).get("notes", [])
                     for n in notes:
                         if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message"]:
