@@ -81,7 +81,7 @@ class KommoAuth:
             print(response.text)
             return None
 
-    def get_access_token(self):
+    def get_access_token(self, force_refresh=False):
         """Obtiene un access_token válido, renovándolo si es necesario."""
         tokens = self.load_tokens()
         
@@ -93,9 +93,9 @@ class KommoAuth:
             else:
                 raise Exception("No hay tokens guardados ni KOMMO_AUTH_CODE válido en .env")
 
-        # Verificar si el token ha expirado (usamos un margen de 1 minuto)
-        if tokens['expires_at'] < time.time() + 60:
-            print("Token expirado. Renovando...")
+        # Verificar si el token ha expirado o si se fuerza la renovación
+        if force_refresh or tokens['expires_at'] < time.time() + 60:
+            print("Token expirado o renovación forzada. Renovando...")
             return self.refresh_access_token(tokens['refresh_token'])
         
         return tokens

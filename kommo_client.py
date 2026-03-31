@@ -101,8 +101,15 @@ class KommoClient:
             # Dar un pequeño respiro a la API de Kommo para que indexe el mensaje recién enviado
             time.sleep(2)
             
+            # Intento 1
             headers = self._get_headers()
             resp_events = requests.get(url_events, headers=headers, params=params_events)
+            
+            # Si da 401, forzar renovación y reintentar
+            if resp_events.status_code == 401:
+                logging.warning(f"401 Detectado para lead {lead_id}. Forzando renovación de token...")
+                headers = {"Authorization": f"Bearer {self.auth.get_access_token(force_refresh=True)['access_token']}"}
+                resp_events = requests.get(url_events, headers=headers, params=params_events)
             
             logging.info(f"API EVENTS lead {lead_id} -> Status: {resp_events.status_code}")
             
