@@ -127,27 +127,32 @@ class KommoClient:
             logging.error(f"Error obteniendo mensajes del talk {talk_id}: {e}")
         return []
 
-    def get_lead_chats_json(self, lead_id):
+    def get_lead_chats_json(self, lead_id, talk_id_direct=None):
         """Extrae historial completo universal (WABA Talks + Events + Notes)."""
         combined_messages = []
         headers = self._get_headers()
         
-        # 1. Buscar TALK_ID vinculados al Lead
-        try:
-            url_lead = f"{self.base_url}/leads/{lead_id}?with=talks"
-            resp_lead = requests.get(url_lead, headers=headers)
-            if resp_lead.status_code == 200:
-                talks = resp_lead.json().get("_embedded", {}).get("talks", [])
-                for t in talks:
-                    talk_id = t.get("id")
-                    if talk_id:
-                        combined_messages.extend(self.get_talk_messages(talk_id))
-        except Exception as e:
-            logging.error(f"Error buscando talks en lead {lead_id}: {e}")
+        # 0. Usar TALK_ID directo si viene del Webhook
+        if talk_id_direct:
+            logging.info(f"Usando TALK_ID directo: {talk_id_direct}")
+            combined_messages.extend(self.get_talk_messages(talk_id_direct))
 
-        # 2. Identificar contacto y buscar en sus talks también
+        # 1. Buscar otros TALK_ID vinculados al Lead
+        if not combined_messages:
+            try:
+                url_lead = f"{self.base_url}/leads/{lead_id}?with=talks"
+                resp_lead = requests.get(url_lead, headers=headers)
+                if resp_lead.status_code == 200:
+                    talks = resp_lead.json().get("_embedded", {}).get("talks", [])
+                    for t in talks:
+                        tid = t.get("id")
+                        if tid: combined_messages.extend(self.get_talk_messages(tid))
+            except Exception as e:
+                logging.error(f"Error buscando talks en lead {lead_id}: {e}")
+
+        # 2. Identificar contacto y buscar en sus talks (Vital para WABA)
         contact_id = self.get_lead_main_contact_id(lead_id)
-        if contact_id:
+        if contact_id and not combined_messages:
             try:
                 url_contact = f"{self.base_url}/contacts/{contact_id}?with=talks"
                 resp_contact = requests.get(url_contact, headers=headers)

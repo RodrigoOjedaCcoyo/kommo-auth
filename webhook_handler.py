@@ -71,12 +71,17 @@ async def kommo_webhook(request: Request):
         talk_keys = [k for k in data.keys() if "talk[update]" in k and "[entity_id]" in k]
         if talk_keys:
             lead_id_str = data.get(talk_keys[0])
+            # Intentar obtener el talk_id real del webhook
+            talk_id_val = None
+            base_talk = talk_keys[0].split("[entity_id]")[0]
+            talk_id_val = data.get(base_talk + "[talk_id]")
+            
             if lead_id_str:
                 try:
                     lead_id = int(lead_id_str)
-                    logging.info(f"CAPTURA -> Re-sincronizando Hilo via API por talk[update] en lead {lead_id}")
+                    logging.info(f"CAPTURA -> Re-sincronizando Hilo via API (Talk: {talk_id_val}) en lead {lead_id}")
                     
-                    history = kommo.get_lead_chats_json(lead_id)
+                    history = kommo.get_lead_chats_json(lead_id, talk_id_direct=talk_id_val)
                     if history:
                         sync.sync_chat_analysis_full(lead_id, history)
                         found = True
