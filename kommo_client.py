@@ -47,8 +47,8 @@ class KommoClient:
         # Endpoint de eventos filtrado por lead
         url_events = f"{self.auth.base_url}/api/v4/events"
         params_events = {
-            "filter[entity_id][0]": lead_id,
-            "filter[entity_type]": "lead",
+            "filter[entity_id]": lead_id,
+            "filter[entity]": "lead",
             "limit": 100
         }
         
@@ -91,8 +91,8 @@ class KommoClient:
         """Extrae el historial de chats de un lead como lista JSON para análisis estructurado."""
         url_events = f"{self.auth.base_url}/api/v4/events"
         params_events = {
-            "filter[entity_id][0]": lead_id,
-            "filter[entity_type]": "lead",
+            "filter[entity_id]": lead_id,
+            "filter[entity]": "lead",
             "limit": 100
         }
         
