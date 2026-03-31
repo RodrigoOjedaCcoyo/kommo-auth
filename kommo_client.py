@@ -108,7 +108,11 @@ class KommoClient:
             # Si da 401, forzar renovación y reintentar
             if resp_events.status_code == 401:
                 logging.warning(f"401 Detectado para lead {lead_id}. Forzando renovación de token...")
-                headers = {"Authorization": f"Bearer {self.auth.get_access_token(force_refresh=True)['access_token']}"}
+                token_info = self.auth.get_access_token(force_refresh=True)
+                if not token_info:
+                    logging.error(f"Fallo crítico: No se pudo obtener un nuevo token para lead {lead_id}")
+                    return []
+                headers = {"Authorization": f"Bearer {token_info['access_token']}"}
                 resp_events = requests.get(url_events, headers=headers, params=params_events)
             
             logging.info(f"API EVENTS lead {lead_id} -> Status: {resp_events.status_code}")

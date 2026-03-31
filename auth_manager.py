@@ -82,7 +82,13 @@ class KommoAuth:
             return None
 
     def get_access_token(self, force_refresh=False):
-        """Obtiene un access_token válido, renovándolo si es necesario."""
+        """Obtiene un access_token válido, priorizando el token de larga duración."""
+        # 1. Priorizar Token de Larga Duración (el más estable)
+        long_lived = os.getenv("KOMMO_LONG_LIVED_TOKEN")
+        if long_lived and long_lived != "your_long_lived_token":
+            return {"access_token": long_lived}
+
+        # 2. Si no hay, usar flujo OAuth con Supabase
         tokens = self.load_tokens()
         
         if not tokens:
@@ -96,7 +102,16 @@ class KommoAuth:
         # Verificar si el token ha expirado o si se fuerza la renovación
         if force_refresh or tokens['expires_at'] < time.time() + 60:
             print("Token expirado o renovación forzada. Renovando...")
-            return self.refresh_access_token(tokens['refresh_token'])
+            new_tokens = self.refresh_access_token(tokens['refresh_token'])
+            if not new_tokens:
+                # Si el refresh falla (ej: token revocado), intentamos usar el AUTH_CODE del env si es nuevo
+                auth_code = os.getenv("KOMMO_AUTH_CODE")
+                if auth_code and auth_code != "your_auth_code":
+                    print("Refresh falló. Intentando usar KOMMO_AUTH_CODE de emergencia...")
+                    return self.exchange_code(auth_code)
+                print("CRÍTICO: El token ha sido revocado y no hay un KOMMO_AUTH_CODE válido para re-sincronizar.")
+                return None
+            return new_tokens
         
         return tokens
 
