@@ -200,57 +200,75 @@ class KommoClient:
         headers = self._get_headers()
         
         # 1. Intentar mensajes directos si tenemos IDs (Talk/UUID)
-        combined_messages.extend(self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid))
+        try:
+            direct_msgs = self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid)
+            combined_messages.extend(direct_msgs)
+        except: pass
         
-        # 2. Recolectar ENTIDADES relacionadas
+        # 2. Recolectar ENTIDADES relacionadas (Lead + Contacto)
         entities = [("lead", lead_id)]
         contact_id = self.get_lead_main_contact_id(lead_id)
         if contact_id:
             entities.append(("contact", contact_id))
             
-        logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id}...")
+        logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id if contact_id else 'N/A'}...")
 
         for entity_type, entity_id in entities:
-            # --- A. EVENTOS (Aquí suele estar el Vendedor) ---
+            # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
             url_events = f"{self.base_url}/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             try:
-                    notes = resp_notes.json().get("_embedded", {}).get("notes", [])
-                    for n in notes:
-                        if n["note_type"] in ["common", "service_message", "incoming_chat_message", "outgoing_chat_message"]:
-                            text = n.get("params", {}).get("text")
-                            if text:
-                                combined_messages.append({
-                                    "time": n["created_at"],
-                                    "from": "saliente" if n["note_type"] in ["common", "service_message"] else "entrante",
-                                    "text": text,
-                                    "author": "Agente" if n["note_type"] in ["common", "service_message"] else "Cliente",
-                                    "id": n["id"]
-                                })
+                resp = requests.get(url_events, headers=headers, params=params_events)
+                if resp.status_code == 200:
+                    combined_messages.extend(self._process_events(resp.json()))
             except: pass
 
-        # 4. Limpieza final y orden cronológico
-        seen_ids = set()
-        seen_texts = set()
-        unique_messages = []
-        combined_messages = sorted(combined_messages, key=lambda x: str(x["time"]))
+            # --- B. NOTAS (Aquí suele estar el historial WABA alternativo) ---
+            url_notes = f"{self.base_url}/{entity_type}s/{entity_id}/notes"
+            try:
+                resp = requests.get(url_notes, headers=headers)
+                if resp.status_code == 200:
+                    combined_messages.extend(self._process_notes(resp.json()))
+            except: pass
+
+        # 3. Limpieza y Orden cronológico
+        if not combined_messages:
+            return []
+            
+        unique_msgs = []
+        seen = set()
+        combined_messages.sort(key=lambda x: str(x["date"]))
         
         for m in combined_messages:
-            msg_id = m.get("id")
-            txt = m.get("text", "").strip()
-            # Evitar duplicados por ID o por texto idéntico en tiempo similar
-            if msg_id not in seen_ids and txt not in seen_texts:
-                seen_ids.add(msg_id)
-                seen_texts.add(txt)
-                unique_messages.append({
-                    "time": datetime.fromtimestamp(int(m["time"]), tz=timezone.utc).isoformat() if isinstance(m["time"], (int,float)) else m["time"],
-                    "from": m["from"],
-                    "text": m["text"],
-                    "author": m["author"]
-                })
+            txt_clean = str(m['text']).strip()
+            key = f"{m['date']}_{txt_clean[:40]}"
+            if key not in seen and len(txt_clean) > 1:
+                unique_msgs.append(m)
+                seen.add(key)
+        
+        logging.info(f"✅ CAPTURA UNIVERSAL lead {lead_id} -> {len(unique_msgs)} mensajes consolidados.")
+        return unique_msgs
 
-        logging.info(f"CAPTURA UNIVERSAL lead {lead_id} -> {len(unique_messages)} mensajes consolidados.")
-        return unique_messages
+    def _process_notes(self, data):
+        """Extrae texto de las notas de Kommo (Estructura WABA)."""
+        notes = data.get("_embedded", {}).get("notes", [])
+        extracted = []
+        for n in notes:
+            text = None
+            params = n.get("params", {})
+            if isinstance(params, dict):
+                text = params.get("text") or params.get("value") or params.get("message")
+            
+            if text and len(str(text)) > 1:
+                ts = n.get("created_at")
+                dt = datetime.fromtimestamp(ts)
+                author = "Vendedor" if n.get("created_by") != 0 else "Cliente"
+                extracted.append({
+                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "author": author,
+                    "text": str(text)
+                })
+        return extracted
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""
