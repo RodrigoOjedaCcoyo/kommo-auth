@@ -39,10 +39,12 @@ async def kommo_webhook(request: Request):
             logging.info(f"--- WEBHOOK FORM RECIBIDO ---")
 
         if not data:
-            logging.warning("Webhook recibido sin datos")
+            logging.warning("--- WEBHOOK VACÍO O SIN LLAVES ---")
             return {"status": "no data"}
 
-        logging.info(f"LLAVES RECIBIDAS: {list(data.keys())}")
+        logging.info(f"--- WEBHOOK RECIBIDO ---")
+        logging.info(f"DATOS CRUDOS: {json.dumps(data)[:200]}...")
+        logging.info(f"LLAVES: {list(data.keys())}")
         found = False
 
         # ── Caso 1: Webhooks Globales de Kommo (Settings > Integrations > Webhooks)
