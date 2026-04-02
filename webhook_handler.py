@@ -19,7 +19,7 @@ logging.basicConfig(
 # Nota: KOMMO_SECRET_KEY se usa para validar la firma de los webhooks
 KOMMO_SECRET_KEY = "tu_clave_secreta_de_integracion"
 
-@app.get("/", methods=["GET", "HEAD"])
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     """Endpoint de salud para que Render sepa que el espejo está encendido."""
     return {"status": "ok", "message": "Espejo Mágico de Kommo funcionando"}
