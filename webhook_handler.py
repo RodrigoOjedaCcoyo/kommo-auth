@@ -111,7 +111,13 @@ import os
 
 if __name__ == "__main__":
     import uvicorn
-    # Render asigna el puerto en la variable de entorno PORT
-    port = int(os.environ.get("PORT", 10000))
-    logging.info(f"🚀 ARRANCANDO SERVIDOR EN PUERTO {port}...")
+    # En Render, PORT es la variable sagrada.
+    render_port = os.environ.get("PORT")
+    port = int(render_port) if render_port else 10000
+    
+    logging.info(f"--- INICIO DE SISTEMA ---")
+    logging.info(f"Puerto detectado: {port}")
+    if not render_port:
+        logging.warning("⚠️ Variable PORT no detectada, usando fallback 10000")
+    
     uvicorn.run(app, host="0.0.0.0", port=port)
