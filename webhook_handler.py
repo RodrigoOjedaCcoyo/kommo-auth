@@ -30,20 +30,27 @@ async def debug_raw(lead_id: int):
     """Muestra los datos crudos que Kommo le da al servidor sin procesar."""
     try:
         headers = kommo._get_headers()
-        # 1. Datos del Lead
+        # 1. Datos del Lead y Contactos vinculados
         lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}?with=contacts", headers=headers)
-        # 2. Eventos crudos (Prueba con [] y sin filtros para descartar permisos)
-        events_global = requests.get(f"{kommo.base_url}/events", headers=headers, params={"limit": 1})
-        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
+        lead_data = lead_resp.json() if lead_resp.status_code == 200 else {}
         
-        # 3. Notificaciones/Notas crudas
-        notes_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
-        
+        contact_id = None
+        if "_embedded" in lead_data and "contacts" in lead_data["_embedded"]:
+            contact_id = lead_data["_embedded"]["contacts"][0]["id"]
+
+        # 2. Eventos del Lead y del Contacto
+        events_lead = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
+        events_contact = {"message": "No contact found"}
+        if contact_id:
+            events_contact_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [contact_id], "filter[entity]": "contact"})
+            events_contact = events_contact_resp.json() if events_contact_resp.status_code == 200 else f"Error {events_contact_resp.status_code}"
+
         return {
-            "lead": lead_resp.json() if lead_resp.status_code == 200 else f"Error {lead_resp.status_code}",
-            "events_global_status": events_global.status_code,
-            "events_raw": events_resp.json() if events_resp.status_code == 200 else f"Error {events_resp.status_code}",
-            "notes_raw": notes_resp.json() if notes_resp.status_code == 200 else f"Error {notes_resp.status_code}"
+            "lead_id": lead_id,
+            "contact_id_found": contact_id,
+            "events_lead": events_lead.json() if events_lead.status_code == 200 else f"Error {events_lead.status_code}",
+            "events_contact": events_contact,
+            "notes_lead": requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers).json()
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
