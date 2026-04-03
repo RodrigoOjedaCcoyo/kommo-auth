@@ -215,21 +215,34 @@ class KommoClient:
 
         for entity_type, entity_id in entities:
             # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
-            url_events = f"{self.base_url}/events"
-            params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
+            url_events = f"{self.base_url}/api/v4/events"
+            params_events = {"filter[entity_id]": entity_id, "filter[entity_type]": entity_type, "limit": 100}
             try:
                 resp = requests.get(url_events, headers=headers, params=params_events)
                 if resp.status_code == 200:
-                    combined_messages.extend(self._process_events(resp.json()))
-            except: pass
+                    raw_data = resp.json()
+                    evs = raw_data.get("_embedded", {}).get("events", [])
+                    logging.info(f"--- EVENTOS {entity_type} ({len(evs)}) ---")
+                    if evs: logging.info(f"Ejm Evento: {json.dumps(evs[0])[:200]}...")
+                    combined_messages.extend(self._process_events(raw_data))
+                else:
+                    logging.warning(f"Error eventos {entity_type}: {resp.status_code}")
+            except Exception as e:
+                logging.error(f"Fallo peticion eventos: {e}")
 
             # --- B. NOTAS (Aquí suele estar el historial WABA alternativo) ---
-            url_notes = f"{self.base_url}/{entity_type}s/{entity_id}/notes"
+            url_notes = f"{self.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
             try:
                 resp = requests.get(url_notes, headers=headers)
                 if resp.status_code == 200:
-                    combined_messages.extend(self._process_notes(resp.json()))
-            except: pass
+                    raw_data = resp.json()
+                    nts = raw_data.get("_embedded", {}).get("notes", [])
+                    logging.info(f"--- NOTAS {entity_type} ({len(nts)}) ---")
+                    combined_messages.extend(self._process_notes(raw_data))
+                else:
+                    logging.warning(f"Error notas {entity_type}: {resp.status_code}")
+            except Exception as e:
+                logging.error(f"Fallo peticion notas: {e}")
 
         # 3. Limpieza y Orden cronológico
         if not combined_messages:
