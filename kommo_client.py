@@ -204,14 +204,10 @@ class KommoClient:
         """Extrae el historial completo (Diálogo Vendedor + Cliente) de forma universal."""
         combined_messages = []
         headers = self._get_headers()
-        
-        # 1. Intentar mensajes directos si tenemos IDs (Talk/UUID)
-        try:
-            direct_msgs = self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid)
-            combined_messages.extend(direct_msgs)
-        except: pass
-        
-        # 2. Recolectar ENTIDADES relacionadas (Lead + Contacto)
+        talk_ids = set()
+        if talk_id_direct: talk_ids.add(talk_id_direct)
+
+        # 1. Recolectar ENTIDADES relacionadas (Lead + Contacto)
         entities = [("lead", lead_id)]
         contact_id = self.get_lead_main_contact_id(lead_id)
         if contact_id:
@@ -220,35 +216,43 @@ class KommoClient:
         logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id if contact_id else 'N/A'}...")
 
         for entity_type, entity_id in entities:
-            # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
+            # --- A. EVENTOS: Buscar Talk IDs y procesar mensajes directos ---
             url_events = f"{self.base_url}/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             try:
                 resp = requests.get(url_events, headers=headers, params=params_events)
                 if resp.status_code == 200:
-                    raw_data = resp.json()
-                    evs = raw_data.get("_embedded", {}).get("events", [])
-                    logging.info(f"--- EVENTOS {entity_type} ({len(evs)}) ---")
-                    if evs: logging.info(f"Ejm Evento: {json.dumps(evs[0])[:200]}...")
-                    combined_messages.extend(self._process_events(raw_data))
-                else:
-                    logging.warning(f"Error eventos {entity_type}: {resp.status_code}")
-            except Exception as e:
-                logging.error(f"Fallo peticion eventos: {e}")
+                    data = resp.json()
+                    evs = data.get("_embedded", {}).get("events", [])
+                    # 🔍 Extraer Talk IDs ocultos en los eventos
+                    for e in evs:
+                        va = e.get("value_after", [{}])[0] if isinstance(e.get("value_after"), list) else e.get("value_after", {})
+                        if isinstance(va, dict):
+                            tid = va.get("message", {}).get("talk_id") or va.get("talk_id")
+                            if tid: talk_ids.add(tid)
+                        
+                        params = e.get("params", {})
+                        if isinstance(params, dict):
+                            tid = params.get("talk_id") or params.get("message", {}).get("talk_id")
+                            if tid: talk_ids.add(tid)
 
-            # --- B. NOTAS (Aquí suele estar el historial WABA alternativo) ---
-            url_notes = f"{self.base_url}/api/v4/{entity_type}s/{entity_id}/notes"
+                    # Procesar mensajes que ya traigan texto en el evento
+                    combined_messages.extend(self._process_events(data))
+            except: pass
+
+            # --- B. NOTAS ---
+            url_notes = f"{self.base_url}/{entity_type}s/{entity_id}/notes"
             try:
                 resp = requests.get(url_notes, headers=headers)
                 if resp.status_code == 200:
-                    raw_data = resp.json()
-                    nts = raw_data.get("_embedded", {}).get("notes", [])
-                    logging.info(f"--- NOTAS {entity_type} ({len(nts)}) ---")
-                    combined_messages.extend(self._process_notes(raw_data))
-                else:
-                    logging.warning(f"Error notas {entity_type}: {resp.status_code}")
-            except Exception as e:
-                logging.error(f"Fallo peticion notas: {e}")
+                    combined_messages.extend(self._process_notes(resp.json()))
+            except: pass
+
+        # 2. "Abrir" los Talk IDs encontrados para sacar el texto real
+        for tid in talk_ids:
+            logging.info(f"🔓 Abriendo Talk ID: {tid}")
+            msgs = self.get_talk_messages(talk_id=tid)
+            combined_messages.extend(msgs)
 
         # 3. Limpieza y Orden cronológico
         if not combined_messages:
@@ -256,10 +260,12 @@ class KommoClient:
             
         unique_msgs = []
         seen = set()
+        # Ordenar por fecha (string ISO o similar)
         combined_messages.sort(key=lambda x: str(x["date"]))
         
         for m in combined_messages:
             txt_clean = str(m['text']).strip()
+            # Evitar duplicados por fecha y primeros 40 caracteres
             key = f"{m['date']}_{txt_clean[:40]}"
             if key not in seen and len(txt_clean) > 1:
                 unique_msgs.append(m)
