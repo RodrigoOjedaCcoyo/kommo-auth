@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Header, HTTPException
 import json
+import requests
 import hashlib
 import hmac
 import logging
