@@ -103,35 +103,41 @@ class KommoClient:
         return None
 
     def get_talk_messages(self, talk_id=None, chat_uuid=None):
-        """Obtiene el historial de mensajes de un Talk o Chat UUID."""
+        """Obtiene el historial de mensajes de un Talk o Chat UUID usando el API Universal."""
         headers = self._get_headers()
+        messages = []
         
-        # Opción A: Talk ID (Clásico)
+        # 🟢 METODO UNIVERSAL: /api/v4/messages (El más robusto para WABA)
         if talk_id:
+            url = f"{self.base_url}/messages"
+            params = {"filter[talk_id][]": [talk_id]}
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                logging.info(f"🔍 API MESSAGES (Talk {talk_id}): Status {resp.status_code}")
+                if resp.status_code == 200:
+                    messages.extend(self._process_api_messages(resp.json()))
+            except: pass
+
+        # 🟡 METODO ALTERNATIVO: Por Chat UUID
+        if not messages and chat_uuid:
+            url = f"{self.base_url}/messages"
+            params = {"filter[chat_id][]": [chat_uuid]}
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                if resp.status_code == 200:
+                    messages.extend(self._process_api_messages(resp.json()))
+            except: pass
+            
+        # 🔴 FALLBACK: /chats/talks/ (API Clásica)
+        if not messages and talk_id:
             url = f"{self.base_url}/chats/talks/{talk_id}/messages"
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    return self._process_api_messages(resp.json())
-                else:
-                    logging.warning(f"Talk ID {talk_id} falló con status {resp.status_code}")
-            except Exception as e:
-                logging.error(f"Error en Talk ID {talk_id}: {e}")
-
-        # Opción B: Chat UUID (El ID largo que vimos en logs)
-        if chat_uuid:
-            # Endpoint alternativo para WABA: /messages?filter[chat_id][]={uuid}
-            url = f"{self.base_url}/messages"
-            params = {"filter[chat_id][]": chat_uuid}
-            try:
-                resp = requests.get(url, headers=headers, params=params)
-                logging.info(f"DEBUG_UUID Scan para {chat_uuid}: Status {resp.status_code}")
-                if resp.status_code == 200:
-                    return self._process_api_messages(resp.json())
-            except Exception as e:
-                logging.error(f"Error en Chat UUID {chat_uuid}: {e}")
+                    messages.extend(self._process_api_messages(resp.json()))
+            except: pass
         
-        return []
+        return messages
 
     def _process_events(self, data):
         """Extractor universal agresivo para capturar Diálogos (Vendedor + Cliente)."""
