@@ -103,41 +103,35 @@ class KommoClient:
         return None
 
     def get_talk_messages(self, talk_id=None, chat_uuid=None):
-        """Obtiene el historial de mensajes de un Talk o Chat UUID usando el API Universal."""
+        """Obtiene el historial de mensajes de un Talk o Chat UUID."""
         headers = self._get_headers()
-        messages = []
         
-        # 🟢 METODO UNIVERSAL: /api/v4/messages (El más robusto para WABA)
+        # Opción A: Talk ID (Clásico)
         if talk_id:
-            url = f"{self.base_url}/messages"
-            params = {"filter[talk_id][]": [talk_id]}
-            try:
-                resp = requests.get(url, headers=headers, params=params)
-                logging.info(f"🔍 API MESSAGES (Talk {talk_id}): Status {resp.status_code}")
-                if resp.status_code == 200:
-                    messages.extend(self._process_api_messages(resp.json()))
-            except: pass
-
-        # 🟡 METODO ALTERNATIVO: Por Chat UUID
-        if not messages and chat_uuid:
-            url = f"{self.base_url}/messages"
-            params = {"filter[chat_id][]": [chat_uuid]}
-            try:
-                resp = requests.get(url, headers=headers, params=params)
-                if resp.status_code == 200:
-                    messages.extend(self._process_api_messages(resp.json()))
-            except: pass
-            
-        # 🔴 FALLBACK: /chats/talks/ (API Clásica)
-        if not messages and talk_id:
             url = f"{self.base_url}/chats/talks/{talk_id}/messages"
             try:
                 resp = requests.get(url, headers=headers)
                 if resp.status_code == 200:
-                    messages.extend(self._process_api_messages(resp.json()))
-            except: pass
+                    return self._process_api_messages(resp.json())
+                else:
+                    logging.warning(f"Talk ID {talk_id} falló con status {resp.status_code}")
+            except Exception as e:
+                logging.error(f"Error en Talk ID {talk_id}: {e}")
+
+        # Opción B: Chat UUID (El ID largo que vimos en logs)
+        if chat_uuid:
+            # Endpoint alternativo para WABA: /messages?filter[chat_id][]={uuid}
+            url = f"{self.base_url}/messages"
+            params = {"filter[chat_id][]": chat_uuid}
+            try:
+                resp = requests.get(url, headers=headers, params=params)
+                logging.info(f"DEBUG_UUID Scan para {chat_uuid}: Status {resp.status_code}")
+                if resp.status_code == 200:
+                    return self._process_api_messages(resp.json())
+            except Exception as e:
+                logging.error(f"Error en Chat UUID {chat_uuid}: {e}")
         
-        return messages
+        return []
 
     def _process_events(self, data):
         """Extractor universal agresivo para capturar Diálogos (Vendedor + Cliente)."""
@@ -145,21 +139,14 @@ class KommoClient:
         extracted = []
         
         for e in evs:
-            etype = e.get("type", "")
-            # 🔍 Solo procesar eventos relacionados con mensajes
-            if "message" not in etype and "chat" not in etype and "talk" not in etype:
-                continue
-
-            # 👥 Determinar Autor de forma inteligente para WABA
-            if "incoming" in etype:
-                author_type = "Cliente"
-            elif "outgoing" in etype or "talk_changed" in etype:
-                author_type = "Vendedor"
-            else:
-                # Fallback por creador (0 suele ser el cliente en algunos sistemas)
-                author_type = "Vendedor" if e.get("created_by") != 0 else "Cliente"
+            # 🔍 LOG DE "MÁXIMA VISIBILIDAD": Ver cada evento crudo
+            logging.info(f"RAW_EVENT: {json.dumps(e)}")
             
             text = None
+            etype = e.get("type", "")
+            # Vendedor si es outgoing o si tiene un user_id de agente
+            author_type = "Vendedor" if "outgoing" in etype or e.get("created_by") != 0 else "Cliente"
+            
             # 🔍 BUSQUEDA AGRESIVA DE TEXTO EN EL JSON
             va = e.get("value_after")
             if isinstance(va, list) and len(va) > 0: va = va[0]
@@ -172,26 +159,20 @@ class KommoClient:
                         va.get("content") or
                         va.get("value"))
             
-            # Fallback a 'params' si existe (Muy común en WABA)
+            # Fallback a 'params' si existe
             if not text:
                 params = e.get("params", {})
                 if isinstance(params, dict):
-                    text = params.get("text") or params.get("message") or params.get("content")
+                    text = params.get("text") or params.get("message")
 
-            # 🚨 EL CAMBIO RADICAL PARA LÍNEA DE TIEMPO WABA:
-            # Si no hay texto, no lo borramos. Guardamos el registro de la hora.
-            if not text or len(str(text).strip()) < 1:
-                tipo_msg = "Recibido" if author_type == "Cliente" else "Enviado por Salesbot/Agente"
-                text = f"[Mensaje WABA {tipo_msg} - Texto oculto por privacidad]"
-
-            text_str = str(text).strip()
-            if text_str:
+            if text and isinstance(text, str) and len(text.strip()) > 1:
+                logging.info(f"✅ TEXTO ENCONTRADO EN EVENTO ({author_type}): {text[:50]}...")
                 ts = e.get("created_at")
                 dt = datetime.fromtimestamp(ts)
                 extracted.append({
                     "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
                     "author": author_type,
-                    "text": text_str
+                    "text": text
                 })
         
         return extracted
@@ -217,10 +198,14 @@ class KommoClient:
         """Extrae el historial completo (Diálogo Vendedor + Cliente) de forma universal."""
         combined_messages = []
         headers = self._get_headers()
-        talk_ids = set()
-        if talk_id_direct: talk_ids.add(talk_id_direct)
-
-        # 1. Recolectar ENTIDADES relacionadas (Lead + Contacto)
+        
+        # 1. Intentar mensajes directos si tenemos IDs (Talk/UUID)
+        try:
+            direct_msgs = self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid)
+            combined_messages.extend(direct_msgs)
+        except: pass
+        
+        # 2. Recolectar ENTIDADES relacionadas (Lead + Contacto)
         entities = [("lead", lead_id)]
         contact_id = self.get_lead_main_contact_id(lead_id)
         if contact_id:
@@ -229,31 +214,16 @@ class KommoClient:
         logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id if contact_id else 'N/A'}...")
 
         for entity_type, entity_id in entities:
-            # --- A. EVENTOS: Buscar Talk IDs y procesar mensajes directos ---
+            # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
             url_events = f"{self.base_url}/events"
             params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             try:
                 resp = requests.get(url_events, headers=headers, params=params_events)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    evs = data.get("_embedded", {}).get("events", [])
-                    # 🔍 Extraer Talk IDs ocultos en los eventos
-                    for e in evs:
-                        va = e.get("value_after", [{}])[0] if isinstance(e.get("value_after"), list) else e.get("value_after", {})
-                        if isinstance(va, dict):
-                            tid = va.get("message", {}).get("talk_id") or va.get("talk_id")
-                            if tid: talk_ids.add(tid)
-                        
-                        params = e.get("params", {})
-                        if isinstance(params, dict):
-                            tid = params.get("talk_id") or params.get("message", {}).get("talk_id")
-                            if tid: talk_ids.add(tid)
-
-                    # Procesar mensajes que ya traigan texto en el evento
-                    combined_messages.extend(self._process_events(data))
+                    combined_messages.extend(self._process_events(resp.json()))
             except: pass
 
-            # --- B. NOTAS ---
+            # --- B. NOTAS (Aquí suele estar el historial WABA alternativo) ---
             url_notes = f"{self.base_url}/{entity_type}s/{entity_id}/notes"
             try:
                 resp = requests.get(url_notes, headers=headers)
@@ -261,24 +231,16 @@ class KommoClient:
                     combined_messages.extend(self._process_notes(resp.json()))
             except: pass
 
-        # 2. "Abrir" los Talk IDs encontrados para sacar el texto real
-        for tid in talk_ids:
-            logging.info(f"🔓 Abriendo Talk ID: {tid}")
-            msgs = self.get_talk_messages(talk_id=tid)
-            combined_messages.extend(msgs)
-
         # 3. Limpieza y Orden cronológico
         if not combined_messages:
             return []
             
         unique_msgs = []
         seen = set()
-        # Ordenar por fecha (string ISO o similar)
         combined_messages.sort(key=lambda x: str(x["date"]))
         
         for m in combined_messages:
             txt_clean = str(m['text']).strip()
-            # Evitar duplicados por fecha y primeros 40 caracteres
             key = f"{m['date']}_{txt_clean[:40]}"
             if key not in seen and len(txt_clean) > 1:
                 unique_msgs.append(m)

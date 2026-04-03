@@ -1,7 +1,5 @@
-# v1.1.0 - Rescatando el servidor del 404 y habilitando el radar de Talk IDs
 from fastapi import FastAPI, Request, Header, HTTPException
 import json
-import requests
 import hashlib
 import hmac
 import logging
@@ -25,77 +23,6 @@ KOMMO_SECRET_KEY = "tu_clave_secreta_de_integracion"
 async def root():
     """Endpoint de salud para que Render sepa que el espejo está encendido."""
     return {"status": "ok", "message": "Espejo Mágico de Kommo funcionando"}
-
-@app.get("/debug_raw/{lead_id}")
-async def debug_raw(lead_id: int):
-    """Muestra los datos crudos que Kommo le da al servidor sin procesar."""
-    try:
-        headers = kommo._get_headers()
-        # 1. Datos del Lead y Contactos vinculados
-        lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}?with=contacts", headers=headers)
-        lead_data = lead_resp.json() if lead_resp.status_code == 200 else {}
-        
-        contact_id = None
-        if "_embedded" in lead_data and "contacts" in lead_data["_embedded"]:
-            contact_id = lead_data["_embedded"]["contacts"][0]["id"]
-
-        # 2. Eventos del Lead y del Contacto
-        events_lead = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
-        
-        events_contact = {"message": "No contact found"}
-        if contact_id:
-            events_contact_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [contact_id], "filter[entity]": "contact"})
-            events_contact = events_contact_resp.json() if events_contact_resp.status_code == 200 else f"Error {events_contact_resp.status_code}"
-
-        # 3. Notas
-        notes_lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
-        
-        return {
-            "lead_id": lead_id,
-            "contact_id_found": contact_id,
-            "events_lead": events_lead.json() if events_lead.status_code == 200 else f"Error {events_lead.status_code}",
-            "events_contact": events_contact,
-            "notes_lead_status": notes_lead_resp.status_code,
-            "notes_lead": notes_lead_resp.json() if notes_lead_resp.status_code == 200 else []
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/debug_scan/{lead_id}")
-async def debug_scan(lead_id: int):
-    """Túnel de diagnóstico para ver qué está capturando el extractor."""
-    try:
-        logging.info(f"🔍 DEBUG_SCAN manual para Lead: {lead_id}")
-        history = kommo.get_lead_chats_json(lead_id)
-        return {
-            "lead_id": lead_id,
-            "mensajes_encontrados": len(history),
-            "historial": history
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/test_waba")
-async def test_waba():
-    """Cable Directo de Verdad: Escaneo final de notas y estructura de eventos."""
-    try:
-        headers = kommo._get_headers()
-        contact_id = 31854386
-        
-        # Prueba 1: Notas del Contacto
-        resp_notes = requests.get(f"{kommo.base_url}/contacts/{contact_id}/notes", headers=headers)
-        
-        # Prueba 2: Un evento crudo del contacto para ver si esconden el texto en 'params' o 'message'
-        resp_events = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": contact_id, "filter[entity]": "contact", "limit": 10})
-        
-        return {
-            "notas_del_contacto_status": resp_notes.status_code,
-            "notas_del_contacto_respuesta": resp_notes.json() if resp_notes.status_code == 200 else resp_notes.text,
-            "eventos_crudos_status": resp_events.status_code,
-            "eventos_crudos_respuesta": resp_events.json() if resp_events.status_code == 200 else resp_events.text
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 @app.post("/webhook/kommo")
 async def kommo_webhook(request: Request):
