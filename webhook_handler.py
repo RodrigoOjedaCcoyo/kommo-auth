@@ -40,17 +40,22 @@ async def debug_raw(lead_id: int):
 
         # 2. Eventos del Lead y del Contacto
         events_lead = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
+        
         events_contact = {"message": "No contact found"}
         if contact_id:
             events_contact_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [contact_id], "filter[entity]": "contact"})
             events_contact = events_contact_resp.json() if events_contact_resp.status_code == 200 else f"Error {events_contact_resp.status_code}"
 
+        # 3. Notas
+        notes_lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
+        
         return {
             "lead_id": lead_id,
             "contact_id_found": contact_id,
             "events_lead": events_lead.json() if events_lead.status_code == 200 else f"Error {events_lead.status_code}",
             "events_contact": events_contact,
-            "notes_lead": requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers).json()
+            "notes_lead_status": notes_lead_resp.status_code,
+            "notes_lead": notes_lead_resp.json() if notes_lead_resp.status_code == 200 else []
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
