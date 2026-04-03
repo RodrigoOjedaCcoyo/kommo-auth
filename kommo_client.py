@@ -215,8 +215,8 @@ class KommoClient:
 
         for entity_type, entity_id in entities:
             # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
-            url_events = f"{self.base_url}/api/v4/events"
-            params_events = {"filter[entity_id]": entity_id, "filter[entity_type]": entity_type, "limit": 100}
+            url_events = f"{self.base_url}/events"
+            params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
             try:
                 resp = requests.get(url_events, headers=headers, params=params_events)
                 if resp.status_code == 200:

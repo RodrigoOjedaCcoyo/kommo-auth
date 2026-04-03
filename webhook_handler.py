@@ -33,7 +33,7 @@ async def debug_raw(lead_id: int):
         # 1. Datos del Lead
         lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}?with=contacts", headers=headers)
         # 2. Eventos crudos
-        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id]": lead_id, "filter[entity_type]": "lead"})
+        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id]": lead_id, "filter[entity]": "lead"})
         # 3. Notificaciones/Notas crudas
         notes_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
         
