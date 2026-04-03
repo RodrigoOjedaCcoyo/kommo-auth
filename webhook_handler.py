@@ -75,6 +75,28 @@ async def debug_scan(lead_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/test_waba")
+async def test_waba():
+    """Cable Directo de Verdad: Pide el Talk 1108 sin pasar por el motor lógico."""
+    try:
+        headers = kommo._get_headers()
+        talk_id = 1108
+        
+        # Prueba 1: Universal
+        resp1 = requests.get(f"{kommo.base_url}/messages?filter[talk_id][]={talk_id}", headers=headers)
+        
+        # Prueba 2: Clásico
+        resp2 = requests.get(f"{kommo.base_url}/chats/talks/{talk_id}/messages", headers=headers)
+        
+        return {
+            "prueba_1_universal_status": resp1.status_code,
+            "prueba_1_universal_respuesta": resp1.json() if resp1.status_code == 200 else resp1.text,
+            "prueba_2_clasico_status": resp2.status_code,
+            "prueba_2_clasico_respuesta": resp2.json() if resp2.status_code == 200 else resp2.text
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/webhook/kommo")
 async def kommo_webhook(request: Request):
     """Receptor universal de eventos de Kommo."""
