@@ -178,13 +178,20 @@ class KommoClient:
                 if isinstance(params, dict):
                     text = params.get("text") or params.get("message") or params.get("content")
 
-            if text and isinstance(text, str) and len(text.strip()) > 1:
+            # 🚨 EL CAMBIO RADICAL PARA LÍNEA DE TIEMPO WABA:
+            # Si no hay texto, no lo borramos. Guardamos el registro de la hora.
+            if not text or len(str(text).strip()) < 1:
+                tipo_msg = "Recibido" if author_type == "Cliente" else "Enviado por Salesbot/Agente"
+                text = f"[Mensaje WABA {tipo_msg} - Texto oculto por privacidad]"
+
+            text_str = str(text).strip()
+            if text_str:
                 ts = e.get("created_at")
                 dt = datetime.fromtimestamp(ts)
                 extracted.append({
                     "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
                     "author": author_type,
-                    "text": text.strip()
+                    "text": text_str
                 })
         
         return extracted
