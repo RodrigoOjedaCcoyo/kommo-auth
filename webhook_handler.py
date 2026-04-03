@@ -32,13 +32,13 @@ async def debug_raw(lead_id: int):
         headers = kommo._get_headers()
         # 1. Datos del Lead
         lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}?with=contacts", headers=headers)
-        # 2. Eventos crudos
-        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id]": lead_id, "filter[entity]": "lead"})
-        # 3. Notificaciones/Notas crudas
-        notes_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
+        # 2. Eventos crudos (Prueba con [] y sin filtros para descartar permisos)
+        events_global = requests.get(f"{kommo.base_url}/events", headers=headers, params={"limit": 1})
+        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
         
         return {
             "lead": lead_resp.json() if lead_resp.status_code == 200 else f"Error {lead_resp.status_code}",
+            "events_global_status": events_global.status_code,
             "events_raw": events_resp.json() if events_resp.status_code == 200 else f"Error {events_resp.status_code}",
             "notes_raw": notes_resp.json() if notes_resp.status_code == 200 else f"Error {notes_resp.status_code}"
         }
