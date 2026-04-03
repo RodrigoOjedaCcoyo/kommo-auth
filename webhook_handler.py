@@ -60,6 +60,20 @@ async def debug_raw(lead_id: int):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@app.get("/debug_scan/{lead_id}")
+async def debug_scan(lead_id: int):
+    """Túnel de diagnóstico para ver qué está capturando el extractor."""
+    try:
+        logging.info(f"🔍 DEBUG_SCAN manual para Lead: {lead_id}")
+        history = kommo.get_lead_chats_json(lead_id)
+        return {
+            "lead_id": lead_id,
+            "mensajes_encontrados": len(history),
+            "historial": history
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.post("/webhook/kommo")
 async def kommo_webhook(request: Request):
     """Receptor universal de eventos de Kommo."""
