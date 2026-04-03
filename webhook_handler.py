@@ -36,6 +36,9 @@ async def debug_raw(lead_id: int):
         events_global = requests.get(f"{kommo.base_url}/events", headers=headers, params={"limit": 1})
         events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": [lead_id], "filter[entity]": "lead"})
         
+        # 3. Notificaciones/Notas crudas
+        notes_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
+        
         return {
             "lead": lead_resp.json() if lead_resp.status_code == 200 else f"Error {lead_resp.status_code}",
             "events_global_status": events_global.status_code,
