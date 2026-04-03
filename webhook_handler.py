@@ -24,16 +24,22 @@ async def root():
     """Endpoint de salud para que Render sepa que el espejo está encendido."""
     return {"status": "ok", "message": "Espejo Mágico de Kommo funcionando"}
 
-@app.get("/debug_scan/{lead_id}")
-async def debug_scan(lead_id: int):
-    """Túnel de diagnóstico para ver qué está capturando el extractor."""
+@app.get("/debug_raw/{lead_id}")
+async def debug_raw(lead_id: int):
+    """Muestra los datos crudos que Kommo le da al servidor sin procesar."""
     try:
-        logging.info(f"🔍 DEBUG_SCAN manual para Lead: {lead_id}")
-        history = kommo.get_lead_chats_json(lead_id)
+        headers = kommo._get_headers()
+        # 1. Datos del Lead
+        lead_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}?with=contacts", headers=headers)
+        # 2. Eventos crudos
+        events_resp = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id]": lead_id, "filter[entity_type]": "lead"})
+        # 3. Notificaciones/Notas crudas
+        notes_resp = requests.get(f"{kommo.base_url}/leads/{lead_id}/notes", headers=headers)
+        
         return {
-            "lead_id": lead_id,
-            "mensajes_encontrados": len(history),
-            "historial": history
+            "lead": lead_resp.json() if lead_resp.status_code == 200 else f"Error {lead_resp.status_code}",
+            "events_raw": events_resp.json() if events_resp.status_code == 200 else f"Error {events_resp.status_code}",
+            "notes_raw": notes_resp.json() if notes_resp.status_code == 200 else f"Error {notes_resp.status_code}"
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
