@@ -139,14 +139,21 @@ class KommoClient:
         extracted = []
         
         for e in evs:
-            # 🔍 LOG DE "MÁXIMA VISIBILIDAD": Ver cada evento crudo
-            logging.info(f"RAW_EVENT: {json.dumps(e)}")
+            etype = e.get("type", "")
+            # 🔍 Solo procesar eventos relacionados con mensajes
+            if "message" not in etype and "chat" not in etype and "talk" not in etype:
+                continue
+
+            # 👥 Determinar Autor de forma inteligente para WABA
+            if "incoming" in etype:
+                author_type = "Cliente"
+            elif "outgoing" in etype or "talk_changed" in etype:
+                author_type = "Vendedor"
+            else:
+                # Fallback por creador (0 suele ser el cliente en algunos sistemas)
+                author_type = "Vendedor" if e.get("created_by") != 0 else "Cliente"
             
             text = None
-            etype = e.get("type", "")
-            # Vendedor si es outgoing o si tiene un user_id de agente
-            author_type = "Vendedor" if "outgoing" in etype or e.get("created_by") != 0 else "Cliente"
-            
             # 🔍 BUSQUEDA AGRESIVA DE TEXTO EN EL JSON
             va = e.get("value_after")
             if isinstance(va, list) and len(va) > 0: va = va[0]
@@ -159,20 +166,19 @@ class KommoClient:
                         va.get("content") or
                         va.get("value"))
             
-            # Fallback a 'params' si existe
+            # Fallback a 'params' si existe (Muy común en WABA)
             if not text:
                 params = e.get("params", {})
                 if isinstance(params, dict):
-                    text = params.get("text") or params.get("message")
+                    text = params.get("text") or params.get("message") or params.get("content")
 
             if text and isinstance(text, str) and len(text.strip()) > 1:
-                logging.info(f"✅ TEXTO ENCONTRADO EN EVENTO ({author_type}): {text[:50]}...")
                 ts = e.get("created_at")
                 dt = datetime.fromtimestamp(ts)
                 extracted.append({
                     "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
                     "author": author_type,
-                    "text": text
+                    "text": text.strip()
                 })
         
         return extracted
