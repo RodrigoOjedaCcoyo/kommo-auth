@@ -77,22 +77,22 @@ async def debug_scan(lead_id: int):
 
 @app.get("/test_waba")
 async def test_waba():
-    """Cable Directo de Verdad: Pide el Talk 1108 sin pasar por el motor lógico."""
+    """Cable Directo de Verdad: Escaneo final de notas y estructura de eventos."""
     try:
         headers = kommo._get_headers()
-        talk_id = 1108
+        contact_id = 31854386
         
-        # Prueba 1: Universal
-        resp1 = requests.get(f"{kommo.base_url}/messages?filter[talk_id][]={talk_id}", headers=headers)
+        # Prueba 1: Notas del Contacto
+        resp_notes = requests.get(f"{kommo.base_url}/contacts/{contact_id}/notes", headers=headers)
         
-        # Prueba 2: Clásico
-        resp2 = requests.get(f"{kommo.base_url}/chats/talks/{talk_id}/messages", headers=headers)
+        # Prueba 2: Un evento crudo del contacto para ver si esconden el texto en 'params' o 'message'
+        resp_events = requests.get(f"{kommo.base_url}/events", headers=headers, params={"filter[entity_id][]": contact_id, "filter[entity]": "contact", "limit": 10})
         
         return {
-            "prueba_1_universal_status": resp1.status_code,
-            "prueba_1_universal_respuesta": resp1.json() if resp1.status_code == 200 else resp1.text,
-            "prueba_2_clasico_status": resp2.status_code,
-            "prueba_2_clasico_respuesta": resp2.json() if resp2.status_code == 200 else resp2.text
+            "notas_del_contacto_status": resp_notes.status_code,
+            "notas_del_contacto_respuesta": resp_notes.json() if resp_notes.status_code == 200 else resp_notes.text,
+            "eventos_crudos_status": resp_events.status_code,
+            "eventos_crudos_respuesta": resp_events.json() if resp_events.status_code == 200 else resp_events.text
         }
     except Exception as e:
         return {"error": str(e)}
