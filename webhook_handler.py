@@ -1,3 +1,4 @@
+# v1.1.0 - Rescatando el servidor del 404 y habilitando el radar de Talk IDs
 from fastapi import FastAPI, Request, Header, HTTPException
 import json
 import requests
