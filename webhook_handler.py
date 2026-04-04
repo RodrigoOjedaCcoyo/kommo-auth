@@ -50,19 +50,28 @@ async def kommo_webhook(request: Request):
         # ── Caso 1: Webhooks Globales de Kommo (Settings > Integrations > Webhooks)
         # Evento de mensaje nuevo: message[add][0][text], message[add][0][element_id]
         for key, value in data.items():
-            if "[text]" in key and value:
+            # Si es un mensaje añadido, capturamos sin importar si el valor es vacío
+            if "[text]" in key:
                 base = key.replace("[text]", "")
+                
+                # Si el texto está vacío (censura de WABA), ponemos un texto genérico
+                text_val = value if value else "[Mensaje Saliente Oculto (WABA)]"
+                
                 lead_id_str = data.get(base + "[element_id]") or data.get(base + "[lead_id]")
                 author_type = data.get(base + "[author][type]", "")
                 author_name = data.get(base + "[author][name]", "")
                 # "bot" o "user" = saliente, "contact" = entrante
                 direction = "saliente" if author_type in ("bot", "user") else "entrante"
 
+                # Si es entrante y no tiene texto ni attachment (muy raro), ignoramos
+                if direction == "entrante" and not value:
+                    continue
+
                 if lead_id_str:
                     try:
                         lead_id = int(lead_id_str)
-                        logging.info(f"CAPTURA -> Lead: {lead_id} [{direction}] {author_name}: {value[:60]}")
-                        sync.sync_chat_analysis(lead_id, str(value), direction=direction, author=author_name)
+                        logging.info(f"CAPTURA -> Lead: {lead_id} [{direction}] {author_name}: {text_val[:60]}")
+                        sync.sync_chat_analysis(lead_id, str(text_val), direction=direction, author=author_name)
                         found = True
                     except (ValueError, TypeError) as e:
                         logging.error(f"Error convirtiendo lead_id: {e}")
