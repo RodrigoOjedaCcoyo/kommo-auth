@@ -8,13 +8,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("pipeline_telemetry.log"),
         logging.StreamHandler()
     ]
 )
 
-def run_telemetry_pipeline():
-    logging.info("--- Iniciando Pipeline de Telemetría Avanzada ---")
+def run_pipeline():
+    logging.info("--- Iniciando Pipeline de Sincronización Simplificado ---")
     
     try:
         kommo = KommoClient()
@@ -31,7 +30,7 @@ def run_telemetry_pipeline():
         sync.sync_stats(stats)
 
         # 3. Extraer y Sincronizar Leads (Recientes + Entrantes)
-        logging.info("Extrayendo leads con historial y chats...")
+        logging.info("Extrayendo leads de Kommo...")
         df_leads = kommo.fetch_all_leads(days_back=2)
         df_unsorted = kommo.fetch_unsorted_leads()
         
@@ -39,24 +38,13 @@ def run_telemetry_pipeline():
         df_total = pd.concat([df_leads, df_unsorted], ignore_index=True) if not df_unsorted.empty else df_leads
         
         if not df_total.empty:
-            # Sincronizar Leads y Eventos de Historial
+            logging.info(f"Sincronizando {len(df_total)} leads con Supabase...")
             sync.sync_leads(df_total)
-            
-            # Ordenar por fecha de actualización (descendente) para buscar chats en los más activos
-            df_total = df_total.sort_values(by="updated_at", ascending=False)
 
-            # 4. Extraer Chat History para cada Lead (Aumentado a 1000 para mayor cobertura)
-            logging.info("Extrayendo historiales de chat para análisis de IA...")
-            for idx, lead_id in enumerate(df_total["id"].head(1000)):
-                messages = kommo.get_lead_chats(lead_id)
-                if messages:
-                    sync.sync_chat_analysis(lead_id, messages)
-                if idx % 100 == 0: logging.info(f"Procesando chats: {idx} completados.")
-
-        logging.info("--- Pipeline de Telemetría completado exitosamente ---")
+        logging.info("--- Pipeline completado exitosamente ---")
 
     except Exception as e:
         logging.error(f"Error crítico en el pipeline: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    run_telemetry_pipeline()
+    run_pipeline()

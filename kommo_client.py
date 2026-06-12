@@ -2,7 +2,7 @@ import time
 import requests
 import pandas as pd
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from auth_manager import KommoAuth
 
 class KommoClient:
@@ -33,242 +33,6 @@ class KommoClient:
         if response.status_code == 200:
             return response.json().get("_embedded", {}).get("users", [])
         return []
-
-    def get_leads_custom_fields(self):
-        """Obtiene el catálogo de campos personalizados para mapeo por ID."""
-        url = f"{self.base_url}/leads/custom_fields"
-        response = requests.get(url, headers=self._get_headers())
-        if response.status_code == 200:
-            return response.json().get("_embedded", {}).get("custom_fields", [])
-        return []
-
-    def get_lead_chats(self, lead_id):
-        """Extrae el historial de chats de un lead buscando en eventos y conversaciones."""
-        # Endpoint de eventos filtrado por lead
-        url_events = f"{self.auth.base_url}/api/v4/events"
-        params_events = {
-            "filter[entity_id]": lead_id,
-            "filter[entity]": "lead",
-            "limit": 100
-        }
-        
-        chat_content = ""
-        try:
-            resp_events = requests.get(url_events, headers=self._get_headers(), params=params_events)
-            if resp_events.status_code == 200:
-                events = resp_events.json().get("_embedded", {}).get("events", [])
-                for event in events:
-                    # Buscamos eventos de chat (entrantes y salientes)
-                    if "chat_message" in event["type"]:
-                        # Intentar extraer texto si está presente (para widgets de terceros)
-                        value = event.get("value_after", [{}])[0]
-                        if "text" in value:
-                            text = value["text"]
-                            prefix = "CLIENTE: " if "incoming" in event["type"] else "AGENTE: "
-                            chat_content += f"[{event['created_at']}] {prefix}{text}\n"
-                        elif "message" in value and "talk_id" in value["message"]:
-                            # Para WABA (WhatsApp Oficial), solo sabemos que hubo un mensaje
-                            # El texto real usualmente se captura via Webhook en tiempo real
-                            chat_content += f"[{event['created_at']}] [Mensajeria WABA Detectada - Ref: {value['message']['talk_id']}]\n"
-            
-            # 2. Fallback a Notas (algunas integraciones guardan el texto aquí)
-            url_notes = f"{self.auth.base_url}/api/v4/leads/{lead_id}/notes"
-            resp_notes = requests.get(url_notes, headers=self._get_headers())
-            if resp_notes.status_code == 200:
-                notes = resp_notes.json().get("_embedded", {}).get("notes", [])
-                for note in notes:
-                    if note["note_type"] in ["common", "service_message"]:
-                        text = note.get("params", {}).get("text", "")
-                        if text:
-                            chat_content += f"[{note['created_at']}] NOTA: {text}\n"
-        except Exception as e:
-            logging.error(f"Error al obtener chats o notas para el lead {lead_id}: {e}")
-        
-        # Retornar el contenido del chat acumulado
-        return chat_content
-
-    def get_lead_main_contact_id(self, lead_id):
-        """Obtiene el ID del contacto principal de un lead."""
-        url = f"{self.auth.base_url}/api/v4/leads/{lead_id}?with=contacts"
-        try:
-            resp = requests.get(url, headers=self._get_headers())
-            if resp.status_code == 200:
-                contacts = resp.json().get("_embedded", {}).get("contacts", [])
-                for c in contacts:
-                    if c.get("is_main"):
-                        return c.get("id")
-                return contacts[0].get("id") if contacts else None
-        except Exception as e:
-            logging.error(f"Error obteniendo contacto del lead {lead_id}: {e}")
-        return None
-
-    def get_talk_messages(self, talk_id=None, chat_uuid=None):
-        """Obtiene el historial de mensajes de un Talk o Chat UUID."""
-        headers = self._get_headers()
-        
-        # Opción A: Talk ID (Clásico)
-        if talk_id:
-            url = f"{self.base_url}/chats/talks/{talk_id}/messages"
-            try:
-                resp = requests.get(url, headers=headers)
-                if resp.status_code == 200:
-                    return self._process_api_messages(resp.json())
-                else:
-                    logging.warning(f"Talk ID {talk_id} falló con status {resp.status_code}")
-            except Exception as e:
-                logging.error(f"Error en Talk ID {talk_id}: {e}")
-
-        # Opción B: Chat UUID (El ID largo que vimos en logs)
-        if chat_uuid:
-            # Endpoint alternativo para WABA: /messages?filter[chat_id][]={uuid}
-            url = f"{self.base_url}/messages"
-            params = {"filter[chat_id][]": chat_uuid}
-            try:
-                resp = requests.get(url, headers=headers, params=params)
-                logging.info(f"DEBUG_UUID Scan para {chat_uuid}: Status {resp.status_code}")
-                if resp.status_code == 200:
-                    return self._process_api_messages(resp.json())
-            except Exception as e:
-                logging.error(f"Error en Chat UUID {chat_uuid}: {e}")
-        
-        return []
-
-    def _process_events(self, data):
-        """Extractor universal agresivo para capturar Diálogos (Vendedor + Cliente)."""
-        evs = data.get("_embedded", {}).get("events", [])
-        extracted = []
-        
-        for e in evs:
-            # 🔍 LOG DE "MÁXIMA VISIBILIDAD": Ver cada evento crudo
-            logging.info(f"RAW_EVENT: {json.dumps(e)}")
-            
-            text = None
-            etype = e.get("type", "")
-            # Vendedor si es outgoing o si tiene un user_id de agente
-            author_type = "Vendedor" if "outgoing" in etype or e.get("created_by") != 0 else "Cliente"
-            
-            # 🔍 BUSQUEDA AGRESIVA DE TEXTO EN EL JSON
-            va = e.get("value_after")
-            if isinstance(va, list) and len(va) > 0: va = va[0]
-            
-            if isinstance(va, dict):
-                # Probar todos los nombres de campos comunes
-                text = (va.get("text") or 
-                        va.get("message_text") or 
-                        va.get("message", {}).get("text") or
-                        va.get("content") or
-                        va.get("value"))
-            
-            # Fallback a 'params' si existe
-            if not text:
-                params = e.get("params", {})
-                if isinstance(params, dict):
-                    text = params.get("text") or params.get("message")
-
-            if text and isinstance(text, str) and len(text.strip()) > 1:
-                logging.info(f"✅ TEXTO ENCONTRADO EN EVENTO ({author_type}): {text[:50]}...")
-                ts = e.get("created_at")
-                dt = datetime.fromtimestamp(ts)
-                extracted.append({
-                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "author": author_type,
-                    "text": text
-                })
-        
-        return extracted
-
-    def _process_api_messages(self, data):
-        """Procesa el JSON de mensajes del API a nuestro formato unificado."""
-        msgs = data.get("_embedded", {}).get("messages", [])
-        extracted = []
-        for m in msgs:
-            text = m.get("text")
-            if text:
-                timestamp = m.get("created_at")
-                dt = datetime.fromtimestamp(timestamp)
-                author = m.get("author", {}).get("name", "Sistema")
-                extracted.append({
-                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "author": author,
-                    "text": text
-                })
-        return extracted
-
-    def get_lead_chats_json(self, lead_id, talk_id_direct=None, chat_uuid=None):
-        """Extrae el historial completo (Diálogo Vendedor + Cliente) de forma universal."""
-        combined_messages = []
-        headers = self._get_headers()
-        
-        # 1. Intentar mensajes directos si tenemos IDs (Talk/UUID)
-        try:
-            direct_msgs = self.get_talk_messages(talk_id=talk_id_direct, chat_uuid=chat_uuid)
-            combined_messages.extend(direct_msgs)
-        except: pass
-        
-        # 2. Recolectar ENTIDADES relacionadas (Lead + Contacto)
-        entities = [("lead", lead_id)]
-        contact_id = self.get_lead_main_contact_id(lead_id)
-        if contact_id:
-            entities.append(("contact", contact_id))
-            
-        logging.info(f"🔍 Escaneando historial para Lead {lead_id} y Contacto {contact_id if contact_id else 'N/A'}...")
-
-        for entity_type, entity_id in entities:
-            # --- A. EVENTOS (Aquí suele estar el Vendedor en WABA) ---
-            url_events = f"{self.base_url}/events"
-            params_events = {"filter[entity_id]": entity_id, "filter[entity]": entity_type, "limit": 100}
-            try:
-                resp = requests.get(url_events, headers=headers, params=params_events)
-                if resp.status_code == 200:
-                    combined_messages.extend(self._process_events(resp.json()))
-            except: pass
-
-            # --- B. NOTAS (Aquí suele estar el historial WABA alternativo) ---
-            url_notes = f"{self.base_url}/{entity_type}s/{entity_id}/notes"
-            try:
-                resp = requests.get(url_notes, headers=headers)
-                if resp.status_code == 200:
-                    combined_messages.extend(self._process_notes(resp.json()))
-            except: pass
-
-        # 3. Limpieza y Orden cronológico
-        if not combined_messages:
-            return []
-            
-        unique_msgs = []
-        seen = set()
-        combined_messages.sort(key=lambda x: str(x["date"]))
-        
-        for m in combined_messages:
-            txt_clean = str(m['text']).strip()
-            key = f"{m['date']}_{txt_clean[:40]}"
-            if key not in seen and len(txt_clean) > 1:
-                unique_msgs.append(m)
-                seen.add(key)
-        
-        logging.info(f"✅ CAPTURA UNIVERSAL lead {lead_id} -> {len(unique_msgs)} mensajes consolidados.")
-        return unique_msgs
-
-    def _process_notes(self, data):
-        """Extrae texto de las notas de Kommo (Estructura WABA)."""
-        notes = data.get("_embedded", {}).get("notes", [])
-        extracted = []
-        for n in notes:
-            text = None
-            params = n.get("params", {})
-            if isinstance(params, dict):
-                text = params.get("text") or params.get("value") or params.get("message")
-            
-            if text and len(str(text)) > 1:
-                ts = n.get("created_at")
-                dt = datetime.fromtimestamp(ts)
-                author = "Vendedor" if n.get("created_by") != 0 else "Cliente"
-                extracted.append({
-                    "date": dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "author": author,
-                    "text": str(text)
-                })
-        return extracted
 
     def get_global_stats(self):
         """Obtiene estadísticas agregadas de los leads."""
@@ -357,12 +121,10 @@ class KommoClient:
                 if not items: break
                 
                 for item in items:
-                    # Extraer el objeto lead embebido en el unsorted
                     embedded_leads = item.get("_embedded", {}).get("leads", [])
                     if embedded_leads:
                         lead = embedded_leads[0]
                         flat = self.flatten_lead(lead)
-                        # Marcar como 'Unsorted' (Status 0 temporalmente)
                         flat["status_id"] = 0 
                         all_unsorted.append(flat)
                 
@@ -378,7 +140,6 @@ class KommoClient:
         all_leads = []
         url = f"{self.base_url}/leads"
         
-        # Filtro de fecha en Unix Timestamp
         since_timestamp = int(time.time()) - (days_back * 86400)
         
         params = {
